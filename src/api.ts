@@ -5,11 +5,19 @@
 
 import {
   UserSession,
+  UserRole,
   Website,
   Incident,
   NotificationSettings,
   WorkspaceSettings,
 } from './types';
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  username: string;
+  role: UserRole;
+}
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
 
@@ -58,9 +66,11 @@ export const api = {
       request<{ settings: WorkspaceSettings }>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
   },
   admin: {
-    listUsers: () => request<{ users: { id: string; email: string; username: string; role: string }[] }>('/admin/users'),
-    createUser: (data: { email: string; username: string; role: string }) =>
-      request<{ user: { id: string; email: string; username: string; role: string }; temporaryPassword: string }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
+    listUsers: () => request<{ users: AdminUser[] }>('/admin/users'),
+    createUser: (data: { email: string; username: string; role: UserRole }) =>
+      request<{ user: AdminUser; temporaryPassword: string }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
+    updateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) =>
+      request<{ user: AdminUser }>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     removeUser: (id: string) => request<{ ok: true }>(`/admin/users/${id}`, { method: 'DELETE' }),
   },
 };

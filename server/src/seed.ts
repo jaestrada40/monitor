@@ -23,7 +23,7 @@ export async function seedAdminIfNeeded(pool: Pool): Promise<void> {
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO users (email, password_hash, username, role) VALUES ($1, $2, $3, 'owner')
+      `INSERT INTO users (email, password_hash, username, role) VALUES ($1, $2, $3, 'super-admin')
        RETURNING id`,
       [email, passwordHash, 'Admin']
     );

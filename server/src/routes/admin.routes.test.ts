@@ -46,9 +46,9 @@ describe('admin routes', () => {
 
   beforeAll(async () => {
     await pool.query('DELETE FROM users WHERE email = ANY($1)', [[OWNER_EMAIL, VIEWER_EMAIL, NEW_USER_EMAIL]]);
-    const owner = await createTestUser(OWNER_EMAIL, 'Owner', 'owner');
+    const owner = await createTestUser(OWNER_EMAIL, 'Owner', 'super-admin');
     ownerId = owner.id;
-    await createTestUser(VIEWER_EMAIL, 'Viewer', 'viewer');
+    await createTestUser(VIEWER_EMAIL, 'Viewer', 'editor');
     ownerCookie = await loginAs(app, OWNER_EMAIL);
     viewerCookie = await loginAs(app, VIEWER_EMAIL);
   });
@@ -84,7 +84,7 @@ describe('admin routes', () => {
     const res = await request(app)
       .post('/api/admin/users')
       .set('Cookie', viewerCookie)
-      .send({ email: 'should-not-be-created@example.com', username: 'Nope', role: 'viewer' });
+      .send({ email: 'should-not-be-created@example.com', username: 'Nope', role: 'editor' });
     expect(res.status).toBe(403);
   });
 
@@ -92,10 +92,10 @@ describe('admin routes', () => {
     const res = await request(app)
       .post('/api/admin/users')
       .set('Cookie', ownerCookie)
-      .send({ email: NEW_USER_EMAIL, username: 'NewUser', role: 'admin' });
+      .send({ email: NEW_USER_EMAIL, username: 'NewUser', role: 'editor' });
     expect(res.status).toBe(201);
     expect(res.body.user.email).toBe(NEW_USER_EMAIL);
-    expect(res.body.user.role).toBe('admin');
+    expect(res.body.user.role).toBe('editor');
     expect(typeof res.body.temporaryPassword).toBe('string');
     expect(res.body.temporaryPassword.length).toBeGreaterThan(0);
     expect(res.body.user.password_hash).toBeUndefined();
@@ -118,8 +118,28 @@ describe('admin routes', () => {
     const res = await request(app)
       .post('/api/admin/users')
       .set('Cookie', ownerCookie)
-      .send({ email: 'not-an-email', username: 'Bad', role: 'viewer' });
+      .send({ email: 'not-an-email', username: 'Bad', role: 'editor' });
     expect(res.status).toBe(400);
+  });
+
+  it('allows an owner to update another user\'s role', async () => {
+    const created = await createTestUser('admin-test-updateme@example.com', 'UpdateMe', 'editor');
+    const res = await request(app)
+      .put(`/api/admin/users/${created.id}`)
+      .set('Cookie', ownerCookie)
+      .send({ role: 'super-admin' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('super-admin');
+    await pool.query('DELETE FROM users WHERE id = $1', [created.id]);
+  });
+
+  it('rejects an owner demoting their own role', async () => {
+    const res = await request(app)
+      .put(`/api/admin/users/${ownerId}`)
+      .set('Cookie', ownerCookie)
+      .send({ role: 'editor' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('cannot_demote_self');
   });
 
   it('prevents a user from deleting their own account', async () => {
@@ -136,7 +156,7 @@ describe('admin routes', () => {
   });
 
   it('allows an owner to delete another user', async () => {
-    const created = await createTestUser('admin-test-deleteme@example.com', 'DeleteMe', 'viewer');
+    const created = await createTestUser('admin-test-deleteme@example.com', 'DeleteMe', 'editor');
     const res = await request(app).delete(`/api/admin/users/${created.id}`).set('Cookie', ownerCookie);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);

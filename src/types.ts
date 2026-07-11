@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export type UserRole = 'super-admin' | 'editor';
+
 export interface UserSession {
   id: string;
   username: string;
   email: string;
   avatarUrl: string;
-  role: 'owner' | 'admin' | 'viewer';
+  role: UserRole;
 }
 
 export interface Website {
@@ -59,7 +61,7 @@ export interface WorkspaceMember {
   id: string;
   name: string;
   email: string;
-  role: 'owner' | 'admin' | 'viewer';
+  role: UserRole;
 }
 
 export interface WorkspaceSettings {

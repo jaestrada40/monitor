@@ -4,15 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  UserSession, 
-  Website, 
-  Incident, 
-  NotificationSettings, 
-  WorkspaceSettings, 
-  ViewType 
+import {
+  UserSession,
+  Website,
+  Incident,
+  NotificationSettings,
+  WorkspaceSettings,
+  UserRole,
+  ViewType
 } from './types';
-import { api } from './api';
+import { api, AdminUser } from './api';
 import { usePersistentState } from './hooks/usePersistentState';
 
 import Sidebar from './components/Sidebar';
@@ -34,7 +35,7 @@ export default function App() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
-  const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; username: string; role: string }[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [currentView, setCurrentView] = usePersistentState<ViewType>('current_view', 'dashboard');
   const [selectedWebsiteId, setSelectedWebsiteId] = useState<string | null>(null);
 
@@ -51,11 +52,21 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    api.websites.list().then(({ websites }) => setWebsites(websites));
-    api.incidents.list().then(({ incidents }) => setIncidents(incidents));
+
+    const loadDomainData = () => {
+      api.websites.list().then(({ websites }) => setWebsites(websites));
+      api.incidents.list().then(({ incidents }) => setIncidents(incidents));
+    };
+
+    loadDomainData();
     api.notifications.get().then(({ notifications }) => setNotifications(notifications));
     api.settings.get().then(({ settings }) => setSettings(settings));
     api.admin.listUsers().then(({ users }) => setAdminUsers(users)).catch(() => setAdminUsers([]));
+
+    // Poll for websites/incidents so status changes from the backend's
+    // uptime-check cron show up without a manual page reload.
+    const pollId = setInterval(loadDomainData, 30000);
+    return () => clearInterval(pollId);
   }, [user]);
 
   // Global keyboard shortcuts for navigation and search focusing
@@ -139,10 +150,15 @@ export default function App() {
     setWebsites(refreshed);
   };
 
-  const handleAddUser = async (data: { email: string; username: string; role: string }) => {
+  const handleAddUser = async (data: { email: string; username: string; role: UserRole }) => {
     const { user: newUser, temporaryPassword } = await api.admin.createUser(data);
     setAdminUsers([...adminUsers, newUser]);
     return { temporaryPassword };
+  };
+
+  const handleUpdateUser = async (id: string, data: Partial<{ username: string; role: UserRole }>) => {
+    const { user: updated } = await api.admin.updateUser(id, data);
+    setAdminUsers(adminUsers.map((u) => (u.id === id ? updated : u)));
   };
 
   const handleRemoveUser = async (id: string) => {
@@ -234,6 +250,7 @@ export default function App() {
             }}
             users={adminUsers}
             onAddUser={handleAddUser}
+            onUpdateUser={handleUpdateUser}
             onRemoveUser={handleRemoveUser}
             currentUserId={user.id}
           />

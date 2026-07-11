@@ -8,10 +8,10 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 
 export const adminRouter = Router();
 
-const VALID_ROLES = ['owner', 'admin', 'viewer'];
+const VALID_ROLES = ['super-admin', 'editor'];
 
 adminRouter.use(requireAuth);
-adminRouter.use(requireRole(['owner', 'admin']));
+adminRouter.use(requireRole(['super-admin']));
 
 adminRouter.get('/', asyncHandler(async (_req, res) => {
   const result = await pool.query(
@@ -62,6 +62,34 @@ adminRouter.post('/', asyncHandler(async (req, res) => {
   }
 
   res.status(201).json({ user, temporaryPassword });
+}));
+
+adminRouter.put('/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { username, role } = req.body ?? {};
+
+  if (role !== undefined && (typeof role !== 'string' || !VALID_ROLES.includes(role))) {
+    res.status(400).json({ error: 'invalid_role' });
+    return;
+  }
+  if (id === req.userId && role && role !== 'super-admin') {
+    res.status(400).json({ error: 'cannot_demote_self' });
+    return;
+  }
+
+  const result = await pool.query(
+    `UPDATE users SET
+       username = COALESCE($2, username),
+       role = COALESCE($3, role)
+     WHERE id = $1
+     RETURNING id, email, username, role`,
+    [id, username ?? null, role ?? null]
+  );
+  if (result.rows.length === 0) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json({ user: result.rows[0] });
 }));
 
 adminRouter.delete('/:id', asyncHandler(async (req, res) => {

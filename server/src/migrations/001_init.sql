@@ -10,9 +10,17 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   username TEXT NOT NULL,
   avatar_url TEXT NOT NULL DEFAULT '',
-  role TEXT NOT NULL DEFAULT 'owner',
+  role TEXT NOT NULL DEFAULT 'super-admin',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Roles were simplified from owner/admin/viewer down to super-admin/editor.
+-- Remap any pre-existing rows and enforce the new set going forward.
+UPDATE users SET role = 'super-admin' WHERE role IN ('owner', 'admin');
+UPDATE users SET role = 'editor' WHERE role = 'viewer';
+ALTER TABLE users ALTER COLUMN role SET DEFAULT 'super-admin';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super-admin', 'editor'));
 
 CREATE TABLE IF NOT EXISTS websites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

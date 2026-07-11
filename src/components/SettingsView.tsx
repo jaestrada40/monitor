@@ -17,18 +17,26 @@ import {
   Globe2,
   Check
 } from 'lucide-react';
-import { WorkspaceSettings } from '../types';
+import { WorkspaceSettings, UserRole } from '../types';
+
+interface AdminUser {
+  id: string;
+  email: string;
+  username: string;
+  role: UserRole;
+}
 
 interface SettingsViewProps {
   settings: WorkspaceSettings;
   onSaveSettings: (settings: WorkspaceSettings) => void;
-  users: { id: string; email: string; username: string; role: string }[];
-  onAddUser: (data: { email: string; username: string; role: string }) => Promise<{ temporaryPassword: string }>;
+  users: AdminUser[];
+  onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ temporaryPassword: string }>;
+  onUpdateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) => Promise<void>;
   onRemoveUser: (id: string) => Promise<void>;
   currentUserId: string;
 }
 
-export default function SettingsView({ settings, onSaveSettings, users, onAddUser, onRemoveUser, currentUserId }: SettingsViewProps) {
+export default function SettingsView({ settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId }: SettingsViewProps) {
 
   // Local state initialized with current props
   const [companyName, setCompanyName] = useState(settings.companyName);
@@ -40,9 +48,10 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
   const [showAddMember, setShowAddMember] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState<'admin' | 'viewer'>('viewer');
+  const [newMemberRole, setNewMemberRole] = useState<UserRole>('editor');
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [roleUpdateError, setRoleUpdateError] = useState<string | null>(null);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,10 +91,19 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
       alert(`Usuario creado. Contraseña temporal (compártela de forma segura, no volverá a mostrarse): ${temporaryPassword}`);
       setNewMemberName('');
       setNewMemberEmail('');
-      setNewMemberRole('viewer');
+      setNewMemberRole('editor');
       setShowAddMember(false);
     } catch {
       alert("No se pudo crear el usuario. Inténtalo de nuevo.");
+    }
+  };
+
+  const handleRoleChange = async (id: string, role: UserRole) => {
+    setRoleUpdateError(null);
+    try {
+      await onUpdateUser(id, { role });
+    } catch {
+      setRoleUpdateError('No se pudo actualizar el rol de este usuario.');
     }
   };
 
@@ -176,6 +194,10 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
               </button>
             </div>
 
+            {roleUpdateError && (
+              <p className="text-[11px] font-semibold text-rose-600 mb-2">{roleUpdateError}</p>
+            )}
+
             {/* Members table */}
             <div className="overflow-x-auto text-xs font-semibold">
               <table className="w-full text-left border-collapse">
@@ -193,15 +215,28 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
                       <td className="py-3 font-bold text-slate-900">{mem.username}</td>
                       <td className="py-3 font-medium text-slate-500 font-mono text-[11px]">{mem.email}</td>
                       <td className="py-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold font-mono ${
-                          mem.role === 'owner'
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200/50'
-                            : mem.role === 'admin'
-                            ? 'bg-indigo-100 text-indigo-800 border border-indigo-200/50'
-                            : 'bg-slate-100 text-slate-700 border border-slate-200/50'
-                        }`}>
-                          {mem.role}
-                        </span>
+                        {mem.id === currentUserId ? (
+                          <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold font-mono ${
+                            mem.role === 'super-admin'
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200/50'
+                              : 'bg-indigo-100 text-indigo-800 border border-indigo-200/50'
+                          }`}>
+                            {mem.role}
+                          </span>
+                        ) : (
+                          <select
+                            value={mem.role}
+                            onChange={(e) => handleRoleChange(mem.id, e.target.value as UserRole)}
+                            className={`px-2 py-1 rounded text-[10px] uppercase font-bold font-mono cursor-pointer border ${
+                              mem.role === 'super-admin'
+                                ? 'bg-purple-100 text-purple-800 border-purple-200/50'
+                                : 'bg-indigo-100 text-indigo-800 border-indigo-200/50'
+                            }`}
+                          >
+                            <option value="super-admin">super-admin</option>
+                            <option value="editor">editor</option>
+                          </select>
+                        )}
                       </td>
                       <td className="py-3 text-right">
                         {mem.id !== currentUserId && (
@@ -352,11 +387,11 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
                 <label className="block text-slate-600 uppercase mb-1.5">Rol de Workspace</label>
                 <select
                   value={newMemberRole}
-                  onChange={(e) => setNewMemberRole(e.target.value as any)}
+                  onChange={(e) => setNewMemberRole(e.target.value as UserRole)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
                 >
-                  <option value="admin">Admin (Soporta ediciones y pings)</option>
-                  <option value="viewer">Viewer (Solo lectura de métricas)</option>
+                  <option value="super-admin">Super Admin (Control total del workspace)</option>
+                  <option value="editor">Editor (Soporta ediciones y pings)</option>
                 </select>
               </div>
 

@@ -36,7 +36,7 @@ describe('seedAdminIfNeeded', () => {
     else process.env.ADMIN_PASSWORD = originalPassword;
   });
 
-  it('creates an admin user with role owner and a valid password hash when the users table is empty', async () => {
+  it('creates an admin user with role super-admin and a valid password hash when the users table is empty', async () => {
     process.env.ADMIN_EMAIL = ADMIN_EMAIL;
     process.env.ADMIN_PASSWORD = ADMIN_PASSWORD;
 
@@ -64,7 +64,7 @@ describe('seedAdminIfNeeded', () => {
 
     const insertUserCall = calls[1];
     expect(insertUserCall[0]).toMatch(/INSERT INTO users/);
-    expect(insertUserCall[0]).toMatch(/'owner'/);
+    expect(insertUserCall[0]).toMatch(/'super-admin'/);
     const [insertedEmail, insertedHash, insertedUsername] = insertUserCall[1];
     expect(insertedEmail).toBe(ADMIN_EMAIL);
     expect(insertedUsername).toBe('Admin');
