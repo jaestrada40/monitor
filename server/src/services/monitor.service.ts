@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { sendIncidentEmail } from './email.service.js';
 
 interface WebsiteCheckTarget {
   id: string;
@@ -40,6 +41,23 @@ export async function createIncidentIfNeeded(
     [websiteId, title, severity, description]
   );
   void websiteResult;
+
+  const notifyResult = await pool.query(
+    `SELECT n.email_enabled, n.email_address, w.name AS website_name
+     FROM notification_settings n JOIN websites w ON w.user_id = n.user_id
+     WHERE w.id = $1`,
+    [websiteId]
+  );
+  const notify = notifyResult.rows[0];
+  if (notify?.email_enabled) {
+    await sendIncidentEmail({
+      to: notify.email_address,
+      websiteName: notify.website_name,
+      kind: 'created',
+      severity,
+      description,
+    });
+  }
 }
 
 export async function resolveActiveIncidentIfAny(pool: Pool, websiteId: string) {
@@ -51,6 +69,17 @@ export async function resolveActiveIncidentIfAny(pool: Pool, websiteId: string) 
 
   await pool.query("UPDATE incidents SET status = 'resolved', resolved_at = now() WHERE id = $1", [active.rows[0].id]);
   await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [websiteId]);
+
+  const notifyResult = await pool.query(
+    `SELECT n.email_enabled, n.email_address, w.name AS website_name
+     FROM notification_settings n JOIN websites w ON w.user_id = n.user_id
+     WHERE w.id = $1`,
+    [websiteId]
+  );
+  const notify = notifyResult.rows[0];
+  if (notify?.email_enabled) {
+    await sendIncidentEmail({ to: notify.email_address, websiteName: notify.website_name, kind: 'resolved' });
+  }
 }
 
 export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
