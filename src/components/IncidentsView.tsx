@@ -25,15 +25,13 @@ interface IncidentsViewProps {
   websites: Website[];
   onAcknowledgeIncident: (id: string) => void;
   onResolveIncident: (id: string) => void;
-  onInjectIncident: (websiteId: string, title: string, severity: 'critical' | 'warning', description: string) => void;
 }
 
 export default function IncidentsView({
   incidents,
   websites,
   onAcknowledgeIncident,
-  onResolveIncident,
-  onInjectIncident
+  onResolveIncident
 }: IncidentsViewProps) {
   
   // Filtering states
@@ -44,37 +42,12 @@ export default function IncidentsView({
   // Expanded item state
   const [expandedIncidentIds, setExpandedIncidentIds] = useState<string[]>([]);
   
-  // Injection state
-  const [isInjecting, setIsInjecting] = useState(false);
-  const [injectWebsiteId, setInjectWebsiteId] = useState(websites[0]?.id || '');
-  const [injectTitle, setInjectTitle] = useState('');
-  const [injectSeverity, setInjectSeverity] = useState<'critical' | 'warning'>('critical');
-  const [injectDescription, setInjectDescription] = useState('');
-
   const toggleExpand = (id: string) => {
     if (expandedIncidentIds.includes(id)) {
       setExpandedIncidentIds(expandedIncidentIds.filter(x => x !== id));
     } else {
       setExpandedIncidentIds([...expandedIncidentIds, id]);
     }
-  };
-
-  const handleInjectSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!injectTitle) {
-      alert("Por favor, ingresa un título para el incidente.");
-      return;
-    }
-    
-    const targetWebName = websites.find(w => w.id === injectWebsiteId)?.name || 'Sitio Desconocido';
-    const desc = injectDescription || `Sonda de alerta reporta fallos generalizados de red en ${targetWebName}. No hay respuesta en puerto estándar.`;
-    
-    onInjectIncident(injectWebsiteId, injectTitle, injectSeverity, desc);
-    
-    // reset
-    setInjectTitle('');
-    setInjectDescription('');
-    setIsInjecting(false);
   };
 
   // Filter logic
@@ -99,14 +72,6 @@ export default function IncidentsView({
           <h1 className="text-2xl font-display font-bold text-slate-900 tracking-tight">Registro de Incidentes</h1>
           <p className="text-sm text-slate-500">Historial completo, escalado y resolución de alarmas sintéticas.</p>
         </div>
-        <button
-          id="btn-trigger-simulator"
-          onClick={() => setIsInjecting(true)}
-          className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-all"
-        >
-          <Flame className="w-4 h-4 text-white animate-pulse" />
-          <span>Simular Incidente / Fallo</span>
-        </button>
       </div>
 
       {/* Filter Row */}
@@ -287,109 +252,10 @@ export default function IncidentsView({
           <div className="py-16 bg-white border border-slate-200 rounded-xl text-center">
             <AlertTriangle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <p className="text-sm font-semibold text-slate-700">No se encontraron incidentes</p>
-            <p className="text-xs text-slate-400 mt-1">Intenta cambiar los filtros o simula un nuevo fallo arriba.</p>
+            <p className="text-xs text-slate-400 mt-1">Intenta cambiar los filtros de búsqueda.</p>
           </div>
         )}
       </div>
-
-      {/* Simulator Modal Popup */}
-      {isInjecting && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full shadow-2xl overflow-hidden font-sans">
-            <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-white">
-              <h3 className="font-display font-bold text-sm tracking-wide flex items-center gap-2">
-                <Flame className="w-4 h-4 text-rose-500 shrink-0" />
-                Simulador de Fallos Sintéticos (Playground)
-              </h3>
-              <button onClick={() => setIsInjecting(false)} className="text-slate-400 hover:text-white transition-colors cursor-pointer font-bold text-lg">&times;</button>
-            </div>
-
-            <form onSubmit={handleInjectSubmit} className="p-6 space-y-4 text-xs font-semibold">
-              <div>
-                <label className="block text-slate-600 uppercase mb-1.5">Sitio para Crasear / Afectar</label>
-                <select
-                  value={injectWebsiteId}
-                  onChange={(e) => setInjectWebsiteId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-bold text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white cursor-pointer"
-                >
-                  {websites.map(w => (
-                    <option key={w.id} value={w.id}>{w.name} ({w.status.toUpperCase()})</option>
-                  ))}
-                </select>
-                <span className="text-[10px] text-slate-400 font-medium block mt-1.5">
-                  Nota: El sitio seleccionado cambiará automáticamente su estado global en el inventario.
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-slate-600 uppercase mb-1.5">Título del Incidente / Alarma</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Error 503 Service Unavailable"
-                  value={injectTitle}
-                  onChange={(e) => setInjectTitle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-600 uppercase mb-1.5">Gravedad / Severidad</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                    <input
-                      type="radio"
-                      name="severity"
-                      checked={injectSeverity === 'critical'}
-                      onChange={() => setInjectSeverity('critical')}
-                      className="text-rose-600 focus:ring-rose-500"
-                    />
-                    <span>Crítico (Sonda roja, Downtime)</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                    <input
-                      type="radio"
-                      name="severity"
-                      checked={injectSeverity === 'warning'}
-                      onChange={() => setInjectSeverity('warning')}
-                      className="text-amber-600 focus:ring-amber-500"
-                    />
-                    <span>Advertencia (Sonda naranja, Degradado)</span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-600 uppercase mb-1.5">Logs de error técnicos (Descripción)</label>
-                <textarea
-                  placeholder="Describe la traza de error simulada..."
-                  value={injectDescription}
-                  onChange={(e) => setInjectDescription(e.target.value)}
-                  rows={3}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-[11px] text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white resize-none"
-                />
-              </div>
-
-              <div className="flex gap-3 justify-end pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsInjecting(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg font-bold cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Flame className="w-4 h-4 text-white" />
-                  <span>Crashear Servicio</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
     </div>
   );
