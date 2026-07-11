@@ -19,16 +19,25 @@ describe('websites routes', () => {
   const app = buildApp();
   let cookie: string;
 
+  let otherCookie: string;
+
   beforeAll(async () => {
     await pool.query("DELETE FROM users WHERE email = 'websites-test@example.com'");
+    await pool.query("DELETE FROM users WHERE email = 'websites-test-2@example.com'");
     const res = await request(app)
       .post('/api/auth/register')
       .send({ email: 'websites-test@example.com', password: 'testpass123', username: 'Tester' });
     cookie = res.headers['set-cookie'][0];
+
+    const res2 = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'websites-test-2@example.com', password: 'testpass123', username: 'Tester2' });
+    otherCookie = res2.headers['set-cookie'][0];
   });
 
   afterAll(async () => {
     await pool.query("DELETE FROM users WHERE email = 'websites-test@example.com'");
+    await pool.query("DELETE FROM users WHERE email = 'websites-test-2@example.com'");
     await pool.end();
   });
 
@@ -48,5 +57,30 @@ describe('websites routes', () => {
   it('rejects unauthenticated requests', async () => {
     const res = await request(app).get('/api/websites');
     expect(res.status).toBe(401);
+  });
+
+  it('prevents cross-user write access to another user\'s website', async () => {
+    const createRes = await request(app)
+      .post('/api/websites')
+      .set('Cookie', cookie)
+      .send({ name: 'Owner Site', url: 'https://owner.example.com', checkInterval: 60 });
+    expect(createRes.status).toBe(201);
+    const websiteId = createRes.body.website.id;
+
+    const toggleRes = await request(app)
+      .post(`/api/websites/${websiteId}/toggle-status`)
+      .set('Cookie', otherCookie);
+    expect(toggleRes.status).toBe(404);
+
+    const putRes = await request(app)
+      .put(`/api/websites/${websiteId}`)
+      .set('Cookie', otherCookie)
+      .send({ name: 'Hijacked' });
+    expect(putRes.status).toBe(404);
+
+    const deleteRes = await request(app)
+      .delete(`/api/websites/${websiteId}`)
+      .set('Cookie', otherCookie);
+    expect(deleteRes.status).toBe(404);
   });
 });

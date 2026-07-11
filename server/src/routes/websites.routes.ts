@@ -51,6 +51,14 @@ websitesRouter.post('/', async (req, res) => {
 
 websitesRouter.put('/:id', async (req, res) => {
   const { name, url, checkInterval, locations, tags } = req.body ?? {};
+  if (url !== undefined) {
+    try {
+      new URL(url);
+    } catch {
+      res.status(400).json({ error: 'invalid_url' });
+      return;
+    }
+  }
   const result = await pool.query(
     `UPDATE websites SET name = COALESCE($1, name), url = COALESCE($2, url),
        check_interval = COALESCE($3, check_interval),
@@ -87,9 +95,10 @@ websitesRouter.post('/:id/toggle-status', async (req, res) => {
     return;
   }
   const nextStatus = current.rows[0].status === 'maintenance' ? 'up' : 'maintenance';
-  const result = await pool.query('UPDATE websites SET status = $1 WHERE id = $2 RETURNING *', [
+  const result = await pool.query('UPDATE websites SET status = $1 WHERE id = $2 AND user_id = $3 RETURNING *', [
     nextStatus,
     req.params.id,
+    req.userId,
   ]);
   res.json({ website: toWebsiteDto(result.rows[0]) });
 });
