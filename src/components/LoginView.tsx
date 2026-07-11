@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, Terminal, ShieldCheck } from 'lucide-react';
 import { UserSession } from '../types';
+import { api } from '../api';
 
 interface LoginViewProps {
   onLoginSuccess: (user: UserSession) => void;
@@ -18,7 +19,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
       setError('Por favor, ingresa tu dirección de correo electrónico.');
@@ -27,15 +28,14 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setError('');
     setLoading(true);
 
-    setTimeout(() => {
+    try {
+      const { user } = await api.auth.login(email, password);
+      onLoginSuccess(user);
+    } catch {
+      setError('Credenciales inválidas. Verifica tu correo y contraseña.');
+    } finally {
       setLoading(false);
-      onLoginSuccess({
-        username: 'Laura Martínez',
-        email: email,
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120',
-        role: 'owner'
-      });
-    }, 800);
+    }
   };
 
   return (
