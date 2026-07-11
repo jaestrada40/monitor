@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { computeUptimeStats } from '../services/uptime.service.js';
 
 export const websitesRouter = Router();
 websitesRouter.use(requireAuth);
 
-function toWebsiteDto(row: any) {
+const EMPTY_STATS = { uptime24h: 100, uptime30d: 100, latestResponseTime: 0, history: [] };
+
+function toWebsiteDto(row: any, stats: { uptime24h: number; uptime30d: number; latestResponseTime: number; history: { timestamp: string; value: number }[] }) {
   return {
     id: row.id,
     name: row.name,
@@ -17,16 +20,19 @@ function toWebsiteDto(row: any) {
     sslStatus: row.ssl_status,
     sslExpiryDays: row.ssl_expiry_days,
     lastChecked: row.last_checked,
-    uptime24h: 0,
-    uptime30d: 0,
-    responseTime: 0,
-    responseTimeHistory: [] as { timestamp: string; value: number }[],
+    uptime24h: stats.uptime24h,
+    uptime30d: stats.uptime30d,
+    responseTime: stats.latestResponseTime,
+    responseTimeHistory: stats.history,
   };
 }
 
 websitesRouter.get('/', async (req, res) => {
   const result = await pool.query('SELECT * FROM websites WHERE user_id = $1 ORDER BY created_at DESC', [req.userId]);
-  res.json({ websites: result.rows.map(toWebsiteDto) });
+  const websites = await Promise.all(
+    result.rows.map(async (row) => toWebsiteDto(row, await computeUptimeStats(pool, row.id)))
+  );
+  res.json({ websites });
 });
 
 websitesRouter.post('/', async (req, res) => {
@@ -46,7 +52,7 @@ websitesRouter.post('/', async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
     [req.userId, name, url, checkInterval || 60, JSON.stringify(locations || []), JSON.stringify(tags || [])]
   );
-  res.status(201).json({ website: toWebsiteDto(result.rows[0]) });
+  res.status(201).json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
 });
 
 websitesRouter.put('/:id', async (req, res) => {
@@ -70,7 +76,7 @@ websitesRouter.put('/:id', async (req, res) => {
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  res.json({ website: toWebsiteDto(result.rows[0]) });
+  res.json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
 });
 
 websitesRouter.delete('/:id', async (req, res) => {
@@ -100,5 +106,5 @@ websitesRouter.post('/:id/toggle-status', async (req, res) => {
     req.params.id,
     req.userId,
   ]);
-  res.json({ website: toWebsiteDto(result.rows[0]) });
+  res.json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
 });
