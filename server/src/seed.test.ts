@@ -1,63 +1,120 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { pool } from './db.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Pool, PoolClient } from 'pg';
 import { verifyPassword } from './services/auth.service.js';
 import { seedAdminIfNeeded } from './seed.js';
 
 const ADMIN_EMAIL = 'seed-test-admin@example.com';
 const ADMIN_PASSWORD = 'seed-test-password-123';
 
+function makeMockClient() {
+  const query = vi.fn();
+  const release = vi.fn();
+  return { query, release };
+}
+
+function makeMockPool(client: ReturnType<typeof makeMockClient>) {
+  const query = vi.fn();
+  const connect = vi.fn().mockResolvedValue(client);
+  return { query, connect } as unknown as Pool & {
+    query: ReturnType<typeof vi.fn>;
+    connect: ReturnType<typeof vi.fn>;
+  };
+}
+
 describe('seedAdminIfNeeded', () => {
-  beforeEach(async () => {
-    await pool.query("DELETE FROM users WHERE email = $1", [ADMIN_EMAIL]);
+  const originalEmail = process.env.ADMIN_EMAIL;
+  const originalPassword = process.env.ADMIN_PASSWORD;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  afterAll(async () => {
-    await pool.query("DELETE FROM users WHERE email = $1", [ADMIN_EMAIL]);
-    await pool.end();
+  afterEach(() => {
+    if (originalEmail === undefined) delete process.env.ADMIN_EMAIL;
+    else process.env.ADMIN_EMAIL = originalEmail;
+    if (originalPassword === undefined) delete process.env.ADMIN_PASSWORD;
+    else process.env.ADMIN_PASSWORD = originalPassword;
   });
 
-  it('creates exactly one admin user with role owner when users table is empty and env vars are set', async () => {
-    const { rows: before } = await pool.query('SELECT COUNT(*) FROM users');
-    if (Number(before[0].count) > 0) {
-      // Not empty in this shared DB run; skip destructive assumption but still verify creation logic works.
-    }
-
+  it('creates an admin user with role owner and a valid password hash when the users table is empty', async () => {
     process.env.ADMIN_EMAIL = ADMIN_EMAIL;
     process.env.ADMIN_PASSWORD = ADMIN_PASSWORD;
 
-    // Force the "empty" path isn't guaranteed since DB is shared; instead directly verify
-    // that when count is 0 (isolated via a distinct check), seed creates the row.
-    // We assert behavior via the users table filtered by our distinctive email.
-    await pool.query("DELETE FROM users WHERE email = $1", [ADMIN_EMAIL]);
-    const countBefore = await pool.query('SELECT COUNT(*) FROM users');
+    const client = makeMockClient();
+    const pool = makeMockPool(client);
 
-    if (Number(countBefore.rows[0].count) === 0) {
-      await seedAdminIfNeeded(pool);
-      const result = await pool.query('SELECT * FROM users WHERE email = $1', [ADMIN_EMAIL]);
-      expect(result.rows.length).toBe(1);
-      expect(result.rows[0].role).toBe('owner');
-      const valid = await verifyPassword(ADMIN_PASSWORD, result.rows[0].password_hash);
-      expect(valid).toBe(true);
+    // Count query on the pool.
+    pool.query.mockResolvedValueOnce({ rows: [{ count: '0' }] });
 
-      // Idempotency: calling again with users non-empty must not create a duplicate.
-      await seedAdminIfNeeded(pool);
-      const result2 = await pool.query('SELECT * FROM users WHERE email = $1', [ADMIN_EMAIL]);
-      expect(result2.rows.length).toBe(1);
-    } else {
-      // Users table is non-empty (other tests left residue or ran concurrently) —
-      // seed should be a no-op and must not throw.
-      await expect(seedAdminIfNeeded(pool)).resolves.toBeUndefined();
-      const result = await pool.query('SELECT * FROM users WHERE email = $1', [ADMIN_EMAIL]);
-      expect(result.rows.length).toBe(0);
-    }
+    // Transactional sequence on the dedicated client.
+    client.query
+      .mockResolvedValueOnce(undefined) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] }) // INSERT INTO users ... RETURNING id
+      .mockResolvedValueOnce(undefined) // INSERT INTO notification_settings
+      .mockResolvedValueOnce(undefined) // INSERT INTO workspace_settings
+      .mockResolvedValueOnce(undefined); // COMMIT
 
-    delete process.env.ADMIN_EMAIL;
-    delete process.env.ADMIN_PASSWORD;
+    await seedAdminIfNeeded(pool);
+
+    expect(pool.query).toHaveBeenCalledWith('SELECT COUNT(*) FROM users');
+    expect(pool.connect).toHaveBeenCalledTimes(1);
+
+    const calls = client.query.mock.calls;
+    expect(calls[0][0]).toBe('BEGIN');
+
+    const insertUserCall = calls[1];
+    expect(insertUserCall[0]).toMatch(/INSERT INTO users/);
+    expect(insertUserCall[0]).toMatch(/'owner'/);
+    const [insertedEmail, insertedHash, insertedUsername] = insertUserCall[1];
+    expect(insertedEmail).toBe(ADMIN_EMAIL);
+    expect(insertedUsername).toBe('Admin');
+
+    // Verify the hash actually passed to the INSERT is a valid bcrypt-style hash
+    // that verifies against ADMIN_PASSWORD.
+    const valid = await verifyPassword(ADMIN_PASSWORD, insertedHash);
+    expect(valid).toBe(true);
+
+    expect(calls[2][0]).toMatch(/INSERT INTO notification_settings/);
+    expect(calls[2][1]).toEqual(['user-1', ADMIN_EMAIL]);
+
+    expect(calls[3][0]).toMatch(/INSERT INTO workspace_settings/);
+    expect(calls[3][1]).toEqual(['user-1']);
+
+    expect(calls[4][0]).toBe('COMMIT');
+
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 
-  it('does not throw and does not create a user when ADMIN_EMAIL/ADMIN_PASSWORD are unset', async () => {
+  it('skips seeding and issues no insert when the users table already has rows', async () => {
+    process.env.ADMIN_EMAIL = ADMIN_EMAIL;
+    process.env.ADMIN_PASSWORD = ADMIN_PASSWORD;
+
+    const client = makeMockClient();
+    const pool = makeMockPool(client);
+
+    pool.query.mockResolvedValueOnce({ rows: [{ count: '3' }] });
+
+    await seedAdminIfNeeded(pool);
+
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    expect(pool.query).toHaveBeenCalledWith('SELECT COUNT(*) FROM users');
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('warns and does not throw or insert when ADMIN_EMAIL/ADMIN_PASSWORD are unset', async () => {
     delete process.env.ADMIN_EMAIL;
     delete process.env.ADMIN_PASSWORD;
+
+    const client = makeMockClient();
+    const pool = makeMockPool(client);
+
+    pool.query.mockResolvedValueOnce({ rows: [{ count: '0' }] });
+
     await expect(seedAdminIfNeeded(pool)).resolves.toBeUndefined();
+
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(client.query).not.toHaveBeenCalled();
   });
 });
