@@ -8,3 +8,6 @@ coverage/
 !.env.example
 graphify-out/
 .superpowers/
+server/node_modules
+server/dist
+server/.env
