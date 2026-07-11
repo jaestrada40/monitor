@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { authRouter } from './routes/auth.routes.js';
+import { websitesRouter } from './routes/websites.routes.js';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/websites', websitesRouter);
 
 const port = Number(process.env.PORT) || 4000;
 app.listen(port, () => {
