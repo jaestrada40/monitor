@@ -201,6 +201,7 @@ export const INITIAL_WORKSPACE_SETTINGS: WorkspaceSettings = {
 };
 
 export const DEFAULT_USER: UserSession = {
+  id: 'user-default',
   username: 'Laura Martínez',
   email: 'laura@monitorpro.io',
   avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120',

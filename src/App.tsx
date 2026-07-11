@@ -34,6 +34,7 @@ export default function App() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; username: string; role: string }[]>([]);
   const [currentView, setCurrentView] = usePersistentState<ViewType>('current_view', 'dashboard');
   const [selectedWebsiteId, setSelectedWebsiteId] = useState<string | null>(null);
 
@@ -54,6 +55,7 @@ export default function App() {
     api.incidents.list().then(({ incidents }) => setIncidents(incidents));
     api.notifications.get().then(({ notifications }) => setNotifications(notifications));
     api.settings.get().then(({ settings }) => setSettings(settings));
+    api.admin.listUsers().then(({ users }) => setAdminUsers(users)).catch(() => setAdminUsers([]));
   }, [user]);
 
   // Global keyboard shortcuts for navigation and search focusing
@@ -135,6 +137,17 @@ export default function App() {
     setIncidents(incidents.map((i) => (i.id === id ? incident : i)));
     const { websites: refreshed } = await api.websites.list();
     setWebsites(refreshed);
+  };
+
+  const handleAddUser = async (data: { email: string; username: string; role: string }) => {
+    const { user: newUser, temporaryPassword } = await api.admin.createUser(data);
+    setAdminUsers([...adminUsers, newUser]);
+    return { temporaryPassword };
+  };
+
+  const handleRemoveUser = async (id: string) => {
+    await api.admin.removeUser(id);
+    setAdminUsers(adminUsers.filter((u) => u.id !== id));
   };
 
   // Clear query and open add modal
@@ -219,6 +232,10 @@ export default function App() {
               const { settings: updated } = await api.settings.update(s);
               setSettings(updated);
             }}
+            users={adminUsers}
+            onAddUser={handleAddUser}
+            onRemoveUser={handleRemoveUser}
+            currentUserId={user.id}
           />
         );
       default:

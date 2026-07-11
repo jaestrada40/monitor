@@ -17,23 +17,26 @@ import {
   Globe2,
   Check
 } from 'lucide-react';
-import { WorkspaceSettings, WorkspaceMember } from '../types';
+import { WorkspaceSettings } from '../types';
 
 interface SettingsViewProps {
   settings: WorkspaceSettings;
   onSaveSettings: (settings: WorkspaceSettings) => void;
+  users: { id: string; email: string; username: string; role: string }[];
+  onAddUser: (data: { email: string; username: string; role: string }) => Promise<{ temporaryPassword: string }>;
+  onRemoveUser: (id: string) => Promise<void>;
+  currentUserId: string;
 }
 
-export default function SettingsView({ settings, onSaveSettings }: SettingsViewProps) {
-  
+export default function SettingsView({ settings, onSaveSettings, users, onAddUser, onRemoveUser, currentUserId }: SettingsViewProps) {
+
   // Local state initialized with current props
   const [companyName, setCompanyName] = useState(settings.companyName);
   const [timezone, setTimezone] = useState(settings.timezone);
   const [plan, setPlan] = useState<'starter' | 'pro' | 'enterprise'>(settings.plan);
   const [apiKey, setApiKey] = useState(settings.apiKey);
-  
-  // Member states
-  const [members, setMembers] = useState<WorkspaceMember[]>(settings.members);
+
+  // Add-member form state (uncommitted input only; the real user list lives in the `users` prop)
   const [showAddMember, setShowAddMember] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberEmail, setNewMemberEmail] = useState('');
@@ -48,7 +51,7 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
       timezone,
       plan,
       apiKey,
-      members
+      members: settings.members
     });
 
     setSaveSuccess(true);
@@ -67,35 +70,33 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
     }
   };
 
-  const handleAddMemberSubmit = (e: React.FormEvent) => {
+  const handleAddMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName || !newMemberEmail) {
       alert("Por favor, ingresa el nombre y email del nuevo miembro.");
       return;
     }
 
-    const newMember: WorkspaceMember = {
-      id: `mem-${Date.now()}`,
-      name: newMemberName,
-      email: newMemberEmail,
-      role: newMemberRole
-    };
-
-    setMembers([...members, newMember]);
-    setNewMemberName('');
-    setNewMemberEmail('');
-    setNewMemberRole('viewer');
-    setShowAddMember(false);
+    try {
+      const { temporaryPassword } = await onAddUser({ email: newMemberEmail, username: newMemberName, role: newMemberRole });
+      alert(`Usuario creado. Contraseña temporal (compártela de forma segura, no volverá a mostrarse): ${temporaryPassword}`);
+      setNewMemberName('');
+      setNewMemberEmail('');
+      setNewMemberRole('viewer');
+      setShowAddMember(false);
+    } catch {
+      alert("No se pudo crear el usuario. Inténtalo de nuevo.");
+    }
   };
 
-  const deleteMember = (id: string) => {
-    const member = members.find(m => m.id === id);
-    if (member?.role === 'owner') {
-      alert("No se puede eliminar al propietario original de la cuenta.");
-      return;
-    }
-    if (confirm(`¿Eliminar a ${member?.name} de este workspace?`)) {
-      setMembers(members.filter(m => m.id !== id));
+  const handleRemoveUser = async (id: string) => {
+    const member = users.find(m => m.id === id);
+    if (confirm(`¿Eliminar a ${member?.username} de este workspace?`)) {
+      try {
+        await onRemoveUser(id);
+      } catch {
+        alert("No se pudo eliminar al usuario. Inténtalo de nuevo.");
+      }
     }
   };
 
@@ -187,14 +188,14 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {members.map((mem) => (
+                  {users.map((mem) => (
                     <tr key={mem.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 font-bold text-slate-900">{mem.name}</td>
+                      <td className="py-3 font-bold text-slate-900">{mem.username}</td>
                       <td className="py-3 font-medium text-slate-500 font-mono text-[11px]">{mem.email}</td>
                       <td className="py-3">
                         <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold font-mono ${
-                          mem.role === 'owner' 
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200/50' 
+                          mem.role === 'owner'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200/50'
                             : mem.role === 'admin'
                             ? 'bg-indigo-100 text-indigo-800 border border-indigo-200/50'
                             : 'bg-slate-100 text-slate-700 border border-slate-200/50'
@@ -203,10 +204,10 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
                         </span>
                       </td>
                       <td className="py-3 text-right">
-                        {mem.role !== 'owner' && (
+                        {mem.id !== currentUserId && (
                           <button
                             type="button"
-                            onClick={() => deleteMember(mem.id)}
+                            onClick={() => handleRemoveUser(mem.id)}
                             className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                             title="Eliminar del Workspace"
                           >

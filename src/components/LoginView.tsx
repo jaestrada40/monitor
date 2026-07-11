@@ -13,13 +13,11 @@ interface LoginViewProps {
 }
 
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
-  const [email, setEmail] = useState('laura@monitorpro.io');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,14 +29,10 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setLoading(true);
 
     try {
-      const { user } = mode === 'register'
-        ? await api.auth.register(email, password, username || email.split('@')[0])
-        : await api.auth.login(email, password);
+      const { user } = await api.auth.login(email, password);
       onLoginSuccess(user);
     } catch {
-      setError(mode === 'register'
-        ? 'No se pudo crear la cuenta. El correo puede estar ya registrado.'
-        : 'Credenciales inválidas. Verifica tu correo y contraseña.');
+      setError('Credenciales inválidas. Verifica tu correo y contraseña.');
     } finally {
       setLoading(false);
     }
@@ -77,19 +71,6 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
           {/* Form body */}
           <form onSubmit={handleSubmit} className="space-y-5">
-            {mode === 'register' && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Nombre Completo</label>
-                <input
-                  id="register-username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-4 py-2.5 text-sm font-medium text-white placeholder-slate-600 focus:outline-hidden focus:border-indigo-500 focus:bg-slate-950 transition-all"
-                  placeholder="Nombre completo"
-                />
-              </div>
-            )}
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Correo Electrónico</label>
               <div className="relative group">
@@ -156,16 +137,6 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                 <span>Ingresar al Workspace</span>
               )}
             </button>
-
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-                className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline transition-colors"
-              >
-                {mode === 'login' ? '¿No tenés cuenta? Registrate' : '¿Ya tenés cuenta? Iniciá sesión'}
-              </button>
-            </div>
           </form>
 
           {/* Quick Info Credentials for Preview */}

@@ -28,8 +28,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   auth: {
-    register: (email: string, password: string, username: string) =>
-      request<{ user: UserSession }>('/auth/register', { method: 'POST', body: JSON.stringify({ email, password, username }) }),
     login: (email: string, password: string) =>
       request<{ user: UserSession }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
     logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),
@@ -58,5 +56,11 @@ export const api = {
     get: () => request<{ settings: WorkspaceSettings }>('/settings'),
     update: (data: WorkspaceSettings) =>
       request<{ settings: WorkspaceSettings }>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  admin: {
+    listUsers: () => request<{ users: { id: string; email: string; username: string; role: string }[] }>('/admin/users'),
+    createUser: (data: { email: string; username: string; role: string }) =>
+      request<{ user: { id: string; email: string; username: string; role: string }; temporaryPassword: string }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
+    removeUser: (id: string) => request<{ ok: true }>(`/admin/users/${id}`, { method: 'DELETE' }),
   },
 };
