@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, Terminal, ShieldCheck } from 'lucide-react';
+import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { UserSession } from '../types';
 import { api } from '../api';
 
@@ -138,17 +138,6 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               )}
             </button>
           </form>
-
-          {/* Quick Info Credentials for Preview */}
-          <div className="mt-8 pt-6 border-t border-slate-800/80 text-center">
-            <span className="text-xs text-slate-500">Credenciales de acceso rápido (modo demostración):</span>
-            <div className="mt-2.5 bg-slate-950/80 border border-slate-800/60 p-2 rounded-lg text-xs font-mono text-indigo-400 flex items-center justify-center gap-1.5">
-              <Terminal className="w-3.5 h-3.5" />
-              <span>laura@monitorpro.io</span>
-              <span className="text-slate-600">/</span>
-              <span>Cualquier contraseña</span>
-            </div>
-          </div>
 
         </div>
       </div>
