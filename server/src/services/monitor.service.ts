@@ -49,14 +49,18 @@ export async function createIncidentIfNeeded(
     [websiteId]
   );
   const notify = notifyResult.rows[0];
-  if (notify?.email_enabled) {
-    await sendIncidentEmail({
-      to: notify.email_address,
-      websiteName: notify.website_name,
-      kind: 'created',
-      severity,
-      description,
-    });
+  if (notify?.email_enabled && notify.email_address) {
+    try {
+      await sendIncidentEmail({
+        to: notify.email_address,
+        websiteName: notify.website_name,
+        kind: 'created',
+        severity,
+        description,
+      });
+    } catch (err) {
+      console.error('Failed to send incident creation email:', err);
+    }
   }
 }
 
@@ -77,8 +81,12 @@ export async function resolveActiveIncidentIfAny(pool: Pool, websiteId: string) 
     [websiteId]
   );
   const notify = notifyResult.rows[0];
-  if (notify?.email_enabled) {
-    await sendIncidentEmail({ to: notify.email_address, websiteName: notify.website_name, kind: 'resolved' });
+  if (notify?.email_enabled && notify.email_address) {
+    try {
+      await sendIncidentEmail({ to: notify.email_address, websiteName: notify.website_name, kind: 'resolved' });
+    } catch (err) {
+      console.error('Failed to send incident resolution email:', err);
+    }
   }
 }
 
