@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -30,12 +31,12 @@ function toWorkspaceDto(row: any) {
   };
 }
 
-settingsRouter.get('/notifications', async (req, res) => {
+settingsRouter.get('/notifications', asyncHandler(async (req, res) => {
   const result = await pool.query('SELECT * FROM notification_settings WHERE user_id = $1', [req.userId]);
   res.json({ notifications: toNotificationsDto(result.rows[0]) });
-});
+}));
 
-settingsRouter.put('/notifications', async (req, res) => {
+settingsRouter.put('/notifications', asyncHandler(async (req, res) => {
   const b = req.body ?? {};
   const result = await pool.query(
     `UPDATE notification_settings SET
@@ -50,14 +51,14 @@ settingsRouter.put('/notifications', async (req, res) => {
     ]
   );
   res.json({ notifications: toNotificationsDto(result.rows[0]) });
-});
+}));
 
-settingsRouter.get('/settings', async (req, res) => {
+settingsRouter.get('/settings', asyncHandler(async (req, res) => {
   const result = await pool.query('SELECT * FROM workspace_settings WHERE user_id = $1', [req.userId]);
   res.json({ settings: toWorkspaceDto(result.rows[0]) });
-});
+}));
 
-settingsRouter.put('/settings', async (req, res) => {
+settingsRouter.put('/settings', asyncHandler(async (req, res) => {
   const b = req.body ?? {};
   const result = await pool.query(
     `UPDATE workspace_settings SET company_name = $1, plan = $2, timezone = $3
@@ -65,4 +66,4 @@ settingsRouter.put('/settings', async (req, res) => {
     [b.companyName, b.plan, b.timezone, req.userId]
   );
   res.json({ settings: toWorkspaceDto(result.rows[0]) });
-});
+}));

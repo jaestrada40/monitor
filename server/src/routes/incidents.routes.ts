@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 export const incidentsRouter = Router();
 incidentsRouter.use(requireAuth);
@@ -38,15 +39,15 @@ const SELECT_WITH_WEBSITE_NAME = `
   JOIN websites w ON w.id = i.website_id
 `;
 
-incidentsRouter.get('/', async (req, res) => {
+incidentsRouter.get('/', asyncHandler(async (req, res) => {
   const result = await pool.query(
     `${SELECT_WITH_WEBSITE_NAME} WHERE w.user_id = $1 ORDER BY i.created_at DESC`,
     [req.userId]
   );
   res.json({ incidents: result.rows.map(toIncidentDto) });
-});
+}));
 
-incidentsRouter.post('/:id/acknowledge', async (req, res) => {
+incidentsRouter.post('/:id/acknowledge', asyncHandler(async (req, res) => {
   const result = await pool.query(
     `UPDATE incidents SET status = 'acknowledged', acknowledged_at = now()
      WHERE id = $1 AND website_id IN (SELECT id FROM websites WHERE user_id = $2)
@@ -59,9 +60,9 @@ incidentsRouter.post('/:id/acknowledge', async (req, res) => {
   }
   const withName = await pool.query(`${SELECT_WITH_WEBSITE_NAME} WHERE i.id = $1`, [req.params.id]);
   res.json({ incident: toIncidentDto(withName.rows[0]) });
-});
+}));
 
-incidentsRouter.post('/:id/resolve', async (req, res) => {
+incidentsRouter.post('/:id/resolve', asyncHandler(async (req, res) => {
   const result = await pool.query(
     `UPDATE incidents SET status = 'resolved', resolved_at = now()
      WHERE id = $1 AND website_id IN (SELECT id FROM websites WHERE user_id = $2)
@@ -75,4 +76,4 @@ incidentsRouter.post('/:id/resolve', async (req, res) => {
   await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [result.rows[0].website_id]);
   const withName = await pool.query(`${SELECT_WITH_WEBSITE_NAME} WHERE i.id = $1`, [req.params.id]);
   res.json({ incident: toIncidentDto(withName.rows[0]) });
-});
+}));

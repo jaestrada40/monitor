@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { computeUptimeStats } from '../services/uptime.service.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 export const websitesRouter = Router();
 websitesRouter.use(requireAuth);
@@ -27,15 +28,15 @@ function toWebsiteDto(row: any, stats: { uptime24h: number; uptime30d: number; l
   };
 }
 
-websitesRouter.get('/', async (req, res) => {
+websitesRouter.get('/', asyncHandler(async (req, res) => {
   const result = await pool.query('SELECT * FROM websites WHERE user_id = $1 ORDER BY created_at DESC', [req.userId]);
   const websites = await Promise.all(
     result.rows.map(async (row) => toWebsiteDto(row, await computeUptimeStats(pool, row.id)))
   );
   res.json({ websites });
-});
+}));
 
-websitesRouter.post('/', async (req, res) => {
+websitesRouter.post('/', asyncHandler(async (req, res) => {
   const { name, url, checkInterval, locations, tags } = req.body ?? {};
   if (typeof name !== 'string' || !name.trim()) {
     res.status(400).json({ error: 'invalid_name' });
@@ -53,9 +54,9 @@ websitesRouter.post('/', async (req, res) => {
     [req.userId, name, url, checkInterval || 60, JSON.stringify(locations || []), JSON.stringify(tags || [])]
   );
   res.status(201).json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
-});
+}));
 
-websitesRouter.put('/:id', async (req, res) => {
+websitesRouter.put('/:id', asyncHandler(async (req, res) => {
   const { name, url, checkInterval, locations, tags } = req.body ?? {};
   if (url !== undefined) {
     try {
@@ -77,9 +78,9 @@ websitesRouter.put('/:id', async (req, res) => {
     return;
   }
   res.json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
-});
+}));
 
-websitesRouter.delete('/:id', async (req, res) => {
+websitesRouter.delete('/:id', asyncHandler(async (req, res) => {
   const result = await pool.query('DELETE FROM websites WHERE id = $1 AND user_id = $2 RETURNING id', [
     req.params.id,
     req.userId,
@@ -89,9 +90,9 @@ websitesRouter.delete('/:id', async (req, res) => {
     return;
   }
   res.json({ ok: true });
-});
+}));
 
-websitesRouter.post('/:id/toggle-status', async (req, res) => {
+websitesRouter.post('/:id/toggle-status', asyncHandler(async (req, res) => {
   const current = await pool.query('SELECT status FROM websites WHERE id = $1 AND user_id = $2', [
     req.params.id,
     req.userId,
@@ -107,4 +108,4 @@ websitesRouter.post('/:id/toggle-status', async (req, res) => {
     req.userId,
   ]);
   res.json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
-});
+}));

@@ -11,6 +11,10 @@ import { pool } from './db.js';
 
 dotenv.config();
 
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
@@ -24,6 +28,13 @@ app.use('/api/auth', authRouter);
 app.use('/api/websites', websitesRouter);
 app.use('/api/incidents', incidentsRouter);
 app.use('/api', settingsRouter);
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled route error:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'internal_server_error' });
+  }
+});
 
 const port = Number(process.env.PORT) || 4000;
 

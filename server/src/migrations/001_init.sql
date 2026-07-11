@@ -1,4 +1,10 @@
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO schema_migrations (version) VALUES ('001_init') ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
@@ -8,7 +14,7 @@ CREATE TABLE users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE websites (
+CREATE TABLE IF NOT EXISTS websites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -23,15 +29,15 @@ CREATE TABLE websites (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE response_time_checks (
+CREATE TABLE IF NOT EXISTS response_time_checks (
   id BIGSERIAL PRIMARY KEY,
   website_id UUID NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
   "timestamp" TIMESTAMPTZ NOT NULL DEFAULT now(),
   value_ms INTEGER NOT NULL
 );
-CREATE INDEX idx_response_time_checks_website_id ON response_time_checks(website_id, "timestamp" DESC);
+CREATE INDEX IF NOT EXISTS idx_response_time_checks_website_id ON response_time_checks(website_id, "timestamp" DESC);
 
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   website_id UUID NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -42,9 +48,9 @@ CREATE TABLE incidents (
   acknowledged_at TIMESTAMPTZ,
   resolved_at TIMESTAMPTZ
 );
-CREATE INDEX idx_incidents_website_id ON incidents(website_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_website_id ON incidents(website_id);
 
-CREATE TABLE notification_settings (
+CREATE TABLE IF NOT EXISTS notification_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   email_enabled BOOLEAN NOT NULL DEFAULT true,
@@ -59,7 +65,7 @@ CREATE TABLE notification_settings (
   threshold_ssl_days INTEGER NOT NULL DEFAULT 7
 );
 
-CREATE TABLE workspace_settings (
+CREATE TABLE IF NOT EXISTS workspace_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   company_name TEXT NOT NULL DEFAULT '',
