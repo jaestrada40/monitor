@@ -1,0 +1,6 @@
+{
+  "name": "MonitorPro",
+  "description": "High-performance infrastructure monitoring for modern teams, with real-time status tracking, incidents logs, reports, and settings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
