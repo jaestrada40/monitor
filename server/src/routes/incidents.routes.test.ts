@@ -3,9 +3,21 @@ import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { pool } from '../db.js';
+import { hashPassword } from '../services/auth.service.js';
 import { authRouter } from './auth.routes.js';
 import { websitesRouter } from './websites.routes.js';
 import { incidentsRouter } from './incidents.routes.js';
+
+async function createTestUser(email: string, username: string) {
+  const passwordHash = await hashPassword('testpass123');
+  const result = await pool.query(
+    `INSERT INTO users (email, password_hash, username) VALUES ($1, $2, $3) RETURNING id`,
+    [email, passwordHash, username]
+  );
+  const userId = result.rows[0].id;
+  await pool.query('INSERT INTO notification_settings (user_id, email_address) VALUES ($1, $2)', [userId, email]);
+  await pool.query('INSERT INTO workspace_settings (user_id) VALUES ($1)', [userId]);
+}
 
 function buildApp() {
   const app = express();
@@ -25,10 +37,11 @@ describe('incidents routes', () => {
 
   beforeAll(async () => {
     await pool.query("DELETE FROM users WHERE email = 'incidents-test@example.com'");
-    const registerRes = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'incidents-test@example.com', password: 'testpass123', username: 'Tester' });
-    cookie = registerRes.headers['set-cookie'][0];
+    await createTestUser('incidents-test@example.com', 'Tester');
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'incidents-test@example.com', password: 'testpass123' });
+    cookie = loginRes.headers['set-cookie'][0];
 
     const websiteRes = await request(app)
       .post('/api/websites')
