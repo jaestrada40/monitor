@@ -6,6 +6,8 @@ import { authRouter } from './routes/auth.routes.js';
 import { websitesRouter } from './routes/websites.routes.js';
 import { incidentsRouter } from './routes/incidents.routes.js';
 import { settingsRouter } from './routes/settings.routes.js';
+import { startScheduler } from './services/scheduler.js';
+import { pool } from './db.js';
 
 dotenv.config();
 
@@ -24,6 +26,9 @@ app.use('/api/incidents', incidentsRouter);
 app.use('/api', settingsRouter);
 
 const port = Number(process.env.PORT) || 4000;
+
+startScheduler(pool);
+
 app.listen(port, () => {
   console.log(`MonitorPro API listening on port ${port}`);
 });
