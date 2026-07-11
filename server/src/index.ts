@@ -6,7 +6,9 @@ import { authRouter } from './routes/auth.routes.js';
 import { websitesRouter } from './routes/websites.routes.js';
 import { incidentsRouter } from './routes/incidents.routes.js';
 import { settingsRouter } from './routes/settings.routes.js';
+import { adminRouter } from './routes/admin.routes.js';
 import { startScheduler } from './services/scheduler.js';
+import { seedAdminIfNeeded } from './seed.js';
 import { pool } from './db.js';
 
 dotenv.config();
@@ -28,6 +30,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/websites', websitesRouter);
 app.use('/api/incidents', incidentsRouter);
 app.use('/api', settingsRouter);
+app.use('/api/admin/users', adminRouter);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled route error:', err);
@@ -38,8 +41,17 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const port = Number(process.env.PORT) || 4000;
 
-startScheduler(pool);
+async function start() {
+  await seedAdminIfNeeded(pool);
 
-app.listen(port, () => {
-  console.log(`MonitorPro API listening on port ${port}`);
+  startScheduler(pool);
+
+  app.listen(port, () => {
+    console.log(`MonitorPro API listening on port ${port}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
