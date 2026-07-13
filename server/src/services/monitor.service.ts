@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { chromium, type Browser } from 'playwright';
 import { sendIncidentEmail } from './email.service.js';
 
 interface WebsiteCheckTarget {
@@ -8,16 +9,56 @@ interface WebsiteCheckTarget {
   thresholdResponseTime: number;
 }
 
-async function pingOnce(url: string): Promise<{ ok: boolean; ms: number }> {
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+// Status codes commonly returned by WAF/bot-protection (Cloudflare, etc.) rather than a
+// genuinely broken site — worth a second check with a real browser before alerting.
+const LIKELY_BOT_BLOCK_STATUS_CODES = new Set([401, 403, 429]);
+
+async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusCode?: number }> {
   const start = Date.now();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': BROWSER_USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
     clearTimeout(timeout);
-    return { ok: response.ok, ms: Date.now() - start };
+    return { ok: response.ok, ms: Date.now() - start, statusCode: response.status };
   } catch {
     return { ok: false, ms: -1 };
+  }
+}
+
+let browserInstance: Browser | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (browserInstance && browserInstance.isConnected()) return browserInstance;
+  browserInstance = await chromium.launch({ headless: true });
+  return browserInstance;
+}
+
+// Renders the page in a real (headless) browser so JS-based WAF challenges (e.g. Cloudflare)
+// resolve the same way they would for a real visitor. Only used as a fallback for likely
+// bot-block status codes — too slow/heavy to run on every check.
+async function browserCheck(url: string): Promise<{ ok: boolean; ms: number }> {
+  const start = Date.now();
+  let context;
+  try {
+    const browser = await getBrowser();
+    context = await browser.newContext({ userAgent: BROWSER_USER_AGENT });
+    const page = await context.newPage();
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    return { ok: !!response && response.ok(), ms: Date.now() - start };
+  } catch {
+    return { ok: false, ms: -1 };
+  } finally {
+    await context?.close().catch(() => {});
   }
 }
 
@@ -96,6 +137,17 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     result = await pingOnce(website.url);
   }
 
+  // Full browser page loads take much longer than a plain HTTP ping, so their timing
+  // isn't comparable to the latency threshold — track separately and skip that check below.
+  let usedBrowserFallback = false;
+  if (!result.ok && result.statusCode !== undefined && LIKELY_BOT_BLOCK_STATUS_CODES.has(result.statusCode)) {
+    const browserResult = await browserCheck(website.url);
+    if (browserResult.ok) {
+      result = browserResult;
+      usedBrowserFallback = true;
+    }
+  }
+
   const valueMs = result.ok ? result.ms : -1;
   await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, $2)', [website.id, valueMs]);
   await pool.query('UPDATE websites SET last_checked = now() WHERE id = $1', [website.id]);
@@ -106,7 +158,7 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     return;
   }
 
-  if (result.ms > website.thresholdResponseTime) {
+  if (!usedBrowserFallback && result.ms > website.thresholdResponseTime) {
     await pool.query("UPDATE websites SET status = 'degraded' WHERE id = $1", [website.id]);
     await createIncidentIfNeeded(
       pool,
