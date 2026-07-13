@@ -4,21 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  UserSession, 
-  Website, 
-  Incident, 
-  NotificationSettings, 
-  WorkspaceSettings, 
-  ViewType 
-} from './types';
 import {
-  INITIAL_WEBSITES,
-  INITIAL_INCIDENTS,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_WORKSPACE_SETTINGS,
-  DEFAULT_USER
-} from './data';
+  UserSession,
+  Website,
+  Incident,
+  NotificationSettings,
+  WorkspaceSettings,
+  UserRole,
+  ViewType
+} from './types';
+import { api, AdminUser } from './api';
 import { usePersistentState } from './hooks/usePersistentState';
 
 import Sidebar from './components/Sidebar';
@@ -33,16 +28,46 @@ import NotificationsView from './components/NotificationsView';
 import SettingsView from './components/SettingsView';
 
 export default function App() {
-  // App-level state, persisted to localStorage on every change
-  const [user, setUser] = usePersistentState<UserSession | null>('user_session', null);
-  const [websites, setWebsites] = usePersistentState<Website[]>('websites', INITIAL_WEBSITES);
-  const [incidents, setIncidents] = usePersistentState<Incident[]>('incidents', INITIAL_INCIDENTS);
-  const [notifications, setNotifications] = usePersistentState<NotificationSettings>('notifications', INITIAL_NOTIFICATIONS);
-  const [settings, setSettings] = usePersistentState<WorkspaceSettings>('settings', INITIAL_WORKSPACE_SETTINGS);
+  // App-level state, loaded from the real API
+  const [user, setUser] = useState<UserSession | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [websites, setWebsites] = useState<Website[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [currentView, setCurrentView] = usePersistentState<ViewType>('current_view', 'dashboard');
-  const [selectedWebsiteId, setSelectedWebsiteId] = usePersistentState<string | null>('selected_website_id', null);
+  const [selectedWebsiteId, setSelectedWebsiteId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+
+  // On mount, check for an existing session and load domain data if present
+  useEffect(() => {
+    api.auth
+      .me()
+      .then(({ user }) => setUser(user))
+      .catch(() => setUser(null))
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadDomainData = () => {
+      api.websites.list().then(({ websites }) => setWebsites(websites));
+      api.incidents.list().then(({ incidents }) => setIncidents(incidents));
+    };
+
+    loadDomainData();
+    api.notifications.get().then(({ notifications }) => setNotifications(notifications));
+    api.settings.get().then(({ settings }) => setSettings(settings));
+    api.admin.listUsers().then(({ users }) => setAdminUsers(users)).catch(() => setAdminUsers([]));
+
+    // Poll for websites/incidents so status changes from the backend's
+    // uptime-check cron show up without a manual page reload.
+    const pollId = setInterval(loadDomainData, 30000);
+    return () => clearInterval(pollId);
+  }, [user]);
 
   // Global keyboard shortcuts for navigation and search focusing
   useEffect(() => {
@@ -69,10 +94,12 @@ export default function App() {
     setCurrentView('dashboard');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await api.auth.logout();
     setUser(null);
+    setWebsites([]);
+    setIncidents([]);
     setCurrentView('login');
-    // Keep websites and settings, but clear active session
   };
 
   const handleNavigateToView = (view: ViewType, extraData?: any) => {
@@ -84,41 +111,20 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 1. Add Website
-  const handleAddWebsite = (newWeb: Omit<Website, 'id' | 'responseTimeHistory' | 'lastChecked'>) => {
-    const id = `web-${Date.now()}`;
-    const baseLatency = newWeb.responseTime || 120;
-    
-    // Prepopulate past 24 hours of response time history
-    const history = [];
-    const now = new Date();
-    for (let i = 23; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * 60 * 60 * 1000);
-      const label = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const variance = (Math.random() - 0.5) * (baseLatency * 0.15);
-      history.push({ timestamp: label, value: Math.max(10, Math.round(baseLatency + variance)) });
-    }
-
-    const website: Website = {
-      ...newWeb,
-      id,
-      responseTimeHistory: history,
-      lastChecked: new Date().toISOString()
-    };
-
+  const handleAddWebsite = async (newWeb: Omit<Website, 'id' | 'responseTimeHistory' | 'lastChecked'>) => {
+    const { website } = await api.websites.create(newWeb);
     setWebsites([website, ...websites]);
   };
 
-  // 2. Edit Website
-  const handleEditWebsite = (updatedWeb: Website) => {
-    setWebsites(websites.map(w => w.id === updatedWeb.id ? updatedWeb : w));
+  const handleEditWebsite = async (updatedWeb: Website) => {
+    const { website } = await api.websites.update(updatedWeb.id, updatedWeb);
+    setWebsites(websites.map((w) => (w.id === website.id ? website : w)));
   };
 
-  // 3. Delete Website
-  const handleDeleteWebsite = (id: string) => {
-    setWebsites(websites.filter(w => w.id !== id));
-    // Clear related incidents
-    setIncidents(incidents.filter(i => i.websiteId !== id));
+  const handleDeleteWebsite = async (id: string) => {
+    await api.websites.remove(id);
+    setWebsites(websites.filter((w) => w.id !== id));
+    setIncidents(incidents.filter((i) => i.websiteId !== id));
     if (selectedWebsiteId === id) {
       setSelectedWebsiteId(null);
       if (currentView === 'details') {
@@ -127,155 +133,37 @@ export default function App() {
     }
   };
 
-  // 4. Toggle Monitoring State (Pause/Resume)
-  const handleToggleStatus = (id: string) => {
-    setWebsites(websites.map(w => {
-      if (w.id === id) {
-        const nextStatus = w.status === 'maintenance' ? 'up' : 'maintenance';
-        // If resuming, restore normal response time, else set to 0
-        const nextResponse = nextStatus === 'maintenance' ? 0 : 120;
-        return { 
-          ...w, 
-          status: nextStatus,
-          responseTime: nextResponse
-        };
-      }
-      return w;
-    }));
+  const handleToggleStatus = async (id: string) => {
+    const { website } = await api.websites.toggleStatus(id);
+    setWebsites(websites.map((w) => (w.id === id ? website : w)));
   };
 
-  // 5. Acknowledge Incident
-  const handleAcknowledgeIncident = (id: string) => {
-    setIncidents(incidents.map(inc => {
-      if (inc.id === id) {
-        return {
-          ...inc,
-          status: 'acknowledged',
-          acknowledgedAt: new Date().toISOString()
-        };
-      }
-      return inc;
-    }));
+  const handleAcknowledgeIncident = async (id: string) => {
+    const { incident } = await api.incidents.acknowledge(id);
+    setIncidents(incidents.map((i) => (i.id === id ? incident : i)));
   };
 
-  // 6. Resolve Incident
-  const handleResolveIncident = (id: string) => {
-    let targetWebsiteId = '';
-    
-    setIncidents(incidents.map(inc => {
-      if (inc.id === id) {
-        targetWebsiteId = inc.websiteId;
-        return {
-          ...inc,
-          status: 'resolved',
-          resolvedAt: new Date().toISOString(),
-          duration: '12m' // mock duration
-        };
-      }
-      return inc;
-    }));
-
-    // Instantly "repair" the crashed website back to normal UP status and restore standard speed
-    if (targetWebsiteId) {
-      setWebsites(prevWebsites => 
-        prevWebsites.map(w => {
-          if (w.id === targetWebsiteId) {
-            return {
-              ...w,
-              status: 'up',
-              responseTime: 110, // normal baseline
-              // Make sure we clear 0s from tail of history
-              responseTimeHistory: w.responseTimeHistory.map((h, idx) => 
-                idx === w.responseTimeHistory.length - 1 && h.value === 0 
-                  ? { ...h, value: 110 } 
-                  : h
-              )
-            };
-          }
-          return w;
-        })
-      );
-    }
+  const handleResolveIncident = async (id: string) => {
+    const { incident } = await api.incidents.resolve(id);
+    setIncidents(incidents.map((i) => (i.id === id ? incident : i)));
+    const { websites: refreshed } = await api.websites.list();
+    setWebsites(refreshed);
   };
 
-  // 7. Inject Incident (Playground Crash simulation)
-  const handleInjectIncident = (
-    websiteId: string, 
-    title: string, 
-    severity: 'critical' | 'warning', 
-    description: string
-  ) => {
-    const web = websites.find(w => w.id === websiteId);
-    if (!web) return;
-
-    const newIncident: Incident = {
-      id: `inc-${Date.now()}`,
-      websiteId,
-      websiteName: web.name,
-      title,
-      severity,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      description
-    };
-
-    setIncidents([newIncident, ...incidents]);
-
-    // Crash the website: set status and mock latency to 0 (down) or high (degraded)
-    setWebsites(prevWebsites => 
-      prevWebsites.map(w => {
-        if (w.id === websiteId) {
-          const nextStatus = severity === 'critical' ? 'down' : 'degraded';
-          const nextResponseTime = severity === 'critical' ? 0 : 450;
-          
-          // Append crash metric to response history
-          const history = [...w.responseTimeHistory];
-          if (history.length > 0) {
-            history[history.length - 1] = { 
-              ...history[history.length - 1], 
-              value: nextResponseTime 
-            };
-          }
-
-          return {
-            ...w,
-            status: nextStatus,
-            responseTime: nextResponseTime,
-            responseTimeHistory: history
-          };
-        }
-        return w;
-      })
-    );
+  const handleAddUser = async (data: { email: string; username: string; role: UserRole }) => {
+    const { user: newUser, temporaryPassword } = await api.admin.createUser(data);
+    setAdminUsers([...adminUsers, newUser]);
+    return { temporaryPassword };
   };
 
-  // 8. Manual Diagnostic ping checking
-  const handleTriggerPingTest = (id: string) => {
-    setWebsites(prevWebsites => 
-      prevWebsites.map(w => {
-        if (w.id === id) {
-          const base = w.status === 'down' ? 0 : w.responseTime || 120;
-          const variance = w.status === 'down' ? 0 : (Math.random() - 0.5) * (base * 0.1);
-          const val = Math.max(0, Math.round(base + variance));
-          
-          const nextHistory = [...w.responseTimeHistory];
-          if (nextHistory.length > 0) {
-            nextHistory[nextHistory.length - 1] = {
-              ...nextHistory[nextHistory.length - 1],
-              value: val
-            };
-          }
+  const handleUpdateUser = async (id: string, data: Partial<{ username: string; role: UserRole }>) => {
+    const { user: updated } = await api.admin.updateUser(id, data);
+    setAdminUsers(adminUsers.map((u) => (u.id === id ? updated : u)));
+  };
 
-          return {
-            ...w,
-            responseTime: val,
-            responseTimeHistory: nextHistory,
-            lastChecked: new Date().toISOString()
-          };
-        }
-        return w;
-      })
-    );
+  const handleRemoveUser = async (id: string) => {
+    await api.admin.removeUser(id);
+    setAdminUsers(adminUsers.filter((u) => u.id !== id));
   };
 
   // Clear query and open add modal
@@ -298,7 +186,7 @@ export default function App() {
           <DashboardView
             websites={websites}
             incidents={incidents}
-            notifications={notifications}
+            notifications={notifications!}
             onNavigateToView={handleNavigateToView}
             onAcknowledgeIncident={handleAcknowledgeIncident}
             onResolveIncident={handleResolveIncident}
@@ -324,7 +212,6 @@ export default function App() {
             onBack={() => handleNavigateToView('inventory')}
             onAcknowledgeIncident={handleAcknowledgeIncident}
             onResolveIncident={handleResolveIncident}
-            onTriggerPingTest={handleTriggerPingTest}
           />
         );
       case 'incidents':
@@ -334,7 +221,6 @@ export default function App() {
             websites={websites}
             onAcknowledgeIncident={handleAcknowledgeIncident}
             onResolveIncident={handleResolveIncident}
-            onInjectIncident={handleInjectIncident}
           />
         );
       case 'reports':
@@ -347,15 +233,26 @@ export default function App() {
       case 'notifications':
         return (
           <NotificationsView
-            notifications={notifications}
-            onSaveNotifications={setNotifications}
+            notifications={notifications!}
+            onSaveNotifications={async (n) => {
+              const { notifications: updated } = await api.notifications.update(n);
+              setNotifications(updated);
+            }}
           />
         );
       case 'settings':
         return (
           <SettingsView
-            settings={settings}
-            onSaveSettings={setSettings}
+            settings={settings!}
+            onSaveSettings={async (s) => {
+              const { settings: updated } = await api.settings.update(s);
+              setSettings(updated);
+            }}
+            users={adminUsers}
+            onAddUser={handleAddUser}
+            onUpdateUser={handleUpdateUser}
+            onRemoveUser={handleRemoveUser}
+            currentUserId={user.id}
           />
         );
       default:
@@ -363,7 +260,7 @@ export default function App() {
           <DashboardView
             websites={websites}
             incidents={incidents}
-            notifications={notifications}
+            notifications={notifications!}
             onNavigateToView={handleNavigateToView}
             onAcknowledgeIncident={handleAcknowledgeIncident}
             onResolveIncident={handleResolveIncident}
@@ -373,8 +270,16 @@ export default function App() {
   };
 
   // Render Login state first if user session is absent
+  if (!authChecked) {
+    return null;
+  }
+
   if (!user) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  if (!notifications || !settings) {
+    return null;
   }
 
   return (

@@ -17,29 +17,41 @@ import {
   Globe2,
   Check
 } from 'lucide-react';
-import { WorkspaceSettings, WorkspaceMember } from '../types';
+import { WorkspaceSettings, UserRole } from '../types';
+
+interface AdminUser {
+  id: string;
+  email: string;
+  username: string;
+  role: UserRole;
+}
 
 interface SettingsViewProps {
   settings: WorkspaceSettings;
   onSaveSettings: (settings: WorkspaceSettings) => void;
+  users: AdminUser[];
+  onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ temporaryPassword: string }>;
+  onUpdateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) => Promise<void>;
+  onRemoveUser: (id: string) => Promise<void>;
+  currentUserId: string;
 }
 
-export default function SettingsView({ settings, onSaveSettings }: SettingsViewProps) {
-  
+export default function SettingsView({ settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId }: SettingsViewProps) {
+
   // Local state initialized with current props
   const [companyName, setCompanyName] = useState(settings.companyName);
   const [timezone, setTimezone] = useState(settings.timezone);
   const [plan, setPlan] = useState<'starter' | 'pro' | 'enterprise'>(settings.plan);
   const [apiKey, setApiKey] = useState(settings.apiKey);
-  
-  // Member states
-  const [members, setMembers] = useState<WorkspaceMember[]>(settings.members);
+
+  // Add-member form state (uncommitted input only; the real user list lives in the `users` prop)
   const [showAddMember, setShowAddMember] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState<'admin' | 'viewer'>('viewer');
+  const [newMemberRole, setNewMemberRole] = useState<UserRole>('editor');
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [roleUpdateError, setRoleUpdateError] = useState<string | null>(null);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +60,7 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
       timezone,
       plan,
       apiKey,
-      members
+      members: settings.members
     });
 
     setSaveSuccess(true);
@@ -67,35 +79,42 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
     }
   };
 
-  const handleAddMemberSubmit = (e: React.FormEvent) => {
+  const handleAddMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName || !newMemberEmail) {
       alert("Por favor, ingresa el nombre y email del nuevo miembro.");
       return;
     }
 
-    const newMember: WorkspaceMember = {
-      id: `mem-${Date.now()}`,
-      name: newMemberName,
-      email: newMemberEmail,
-      role: newMemberRole
-    };
-
-    setMembers([...members, newMember]);
-    setNewMemberName('');
-    setNewMemberEmail('');
-    setNewMemberRole('viewer');
-    setShowAddMember(false);
+    try {
+      const { temporaryPassword } = await onAddUser({ email: newMemberEmail, username: newMemberName, role: newMemberRole });
+      alert(`Usuario creado. Contraseña temporal (compártela de forma segura, no volverá a mostrarse): ${temporaryPassword}`);
+      setNewMemberName('');
+      setNewMemberEmail('');
+      setNewMemberRole('editor');
+      setShowAddMember(false);
+    } catch {
+      alert("No se pudo crear el usuario. Inténtalo de nuevo.");
+    }
   };
 
-  const deleteMember = (id: string) => {
-    const member = members.find(m => m.id === id);
-    if (member?.role === 'owner') {
-      alert("No se puede eliminar al propietario original de la cuenta.");
-      return;
+  const handleRoleChange = async (id: string, role: UserRole) => {
+    setRoleUpdateError(null);
+    try {
+      await onUpdateUser(id, { role });
+    } catch {
+      setRoleUpdateError('No se pudo actualizar el rol de este usuario.');
     }
-    if (confirm(`¿Eliminar a ${member?.name} de este workspace?`)) {
-      setMembers(members.filter(m => m.id !== id));
+  };
+
+  const handleRemoveUser = async (id: string) => {
+    const member = users.find(m => m.id === id);
+    if (confirm(`¿Eliminar a ${member?.username} de este workspace?`)) {
+      try {
+        await onRemoveUser(id);
+      } catch {
+        alert("No se pudo eliminar al usuario. Inténtalo de nuevo.");
+      }
     }
   };
 
@@ -175,6 +194,10 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
               </button>
             </div>
 
+            {roleUpdateError && (
+              <p className="text-[11px] font-semibold text-rose-600 mb-2">{roleUpdateError}</p>
+            )}
+
             {/* Members table */}
             <div className="overflow-x-auto text-xs font-semibold">
               <table className="w-full text-left border-collapse">
@@ -187,26 +210,39 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {members.map((mem) => (
+                  {users.map((mem) => (
                     <tr key={mem.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 font-bold text-slate-900">{mem.name}</td>
+                      <td className="py-3 font-bold text-slate-900">{mem.username}</td>
                       <td className="py-3 font-medium text-slate-500 font-mono text-[11px]">{mem.email}</td>
                       <td className="py-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold font-mono ${
-                          mem.role === 'owner' 
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200/50' 
-                            : mem.role === 'admin'
-                            ? 'bg-indigo-100 text-indigo-800 border border-indigo-200/50'
-                            : 'bg-slate-100 text-slate-700 border border-slate-200/50'
-                        }`}>
-                          {mem.role}
-                        </span>
+                        {mem.id === currentUserId ? (
+                          <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold font-mono ${
+                            mem.role === 'super-admin'
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200/50'
+                              : 'bg-indigo-100 text-indigo-800 border border-indigo-200/50'
+                          }`}>
+                            {mem.role}
+                          </span>
+                        ) : (
+                          <select
+                            value={mem.role}
+                            onChange={(e) => handleRoleChange(mem.id, e.target.value as UserRole)}
+                            className={`px-2 py-1 rounded text-[10px] uppercase font-bold font-mono cursor-pointer border ${
+                              mem.role === 'super-admin'
+                                ? 'bg-purple-100 text-purple-800 border-purple-200/50'
+                                : 'bg-indigo-100 text-indigo-800 border-indigo-200/50'
+                            }`}
+                          >
+                            <option value="super-admin">super-admin</option>
+                            <option value="editor">editor</option>
+                          </select>
+                        )}
                       </td>
                       <td className="py-3 text-right">
-                        {mem.role !== 'owner' && (
+                        {mem.id !== currentUserId && (
                           <button
                             type="button"
-                            onClick={() => deleteMember(mem.id)}
+                            onClick={() => handleRemoveUser(mem.id)}
                             className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                             title="Eliminar del Workspace"
                           >
@@ -351,11 +387,11 @@ export default function SettingsView({ settings, onSaveSettings }: SettingsViewP
                 <label className="block text-slate-600 uppercase mb-1.5">Rol de Workspace</label>
                 <select
                   value={newMemberRole}
-                  onChange={(e) => setNewMemberRole(e.target.value as any)}
+                  onChange={(e) => setNewMemberRole(e.target.value as UserRole)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
                 >
-                  <option value="admin">Admin (Soporta ediciones y pings)</option>
-                  <option value="viewer">Viewer (Solo lectura de métricas)</option>
+                  <option value="super-admin">Super Admin (Control total del workspace)</option>
+                  <option value="editor">Editor (Soporta ediciones y pings)</option>
                 </select>
               </div>
 

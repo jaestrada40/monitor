@@ -29,7 +29,6 @@ interface DetailsViewProps {
   onBack: () => void;
   onAcknowledgeIncident: (id: string) => void;
   onResolveIncident: (id: string) => void;
-  onTriggerPingTest: (id: string) => void;
 }
 
 export default function DetailsView({
@@ -37,36 +36,13 @@ export default function DetailsView({
   incidents,
   onBack,
   onAcknowledgeIncident,
-  onResolveIncident,
-  onTriggerPingTest
+  onResolveIncident
 }: DetailsViewProps) {
-  
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ status: string; latency: number } | null>(null);
 
   // Filter incidents for this specific website
   const siteIncidents = incidents.filter(i => i.websiteId === website.id);
   const activeSiteIncidents = siteIncidents.filter(i => i.status !== 'resolved');
   const resolvedSiteIncidents = siteIncidents.filter(i => i.status === 'resolved');
-
-  const handleTestNow = () => {
-    setTesting(true);
-    setTestResult(null);
-    onTriggerPingTest(website.id);
-
-    // Simulate real diagnostic ping test
-    setTimeout(() => {
-      setTesting(false);
-      const simulatedLatency = website.status === 'down' 
-        ? 0 
-        : Math.round(website.responseTime * (0.8 + Math.random() * 0.4));
-      
-      setTestResult({
-        status: website.status === 'down' ? 'ERROR_CONNECTION_TIMEOUT' : 'HTTP_200_OK',
-        latency: simulatedLatency
-      });
-    }, 1500);
-  };
 
   // Build the detailed response chart values
   const history = website.responseTimeHistory || [];
@@ -188,39 +164,7 @@ export default function DetailsView({
                 <h3 className="text-sm font-bold text-slate-900">Historial Latencia 24 Horas</h3>
                 <p className="text-xs text-slate-500">Muestreo sintético de velocidad de carga por hora.</p>
               </div>
-              
-              <div className="flex gap-2">
-                <button
-                  id="btn-trigger-ping"
-                  onClick={handleTestNow}
-                  disabled={testing}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-800 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-3xs"
-                >
-                  <RotateCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} />
-                  <span>{testing ? 'Comprobando...' : 'Probar Ahora'}</span>
-                </button>
-              </div>
             </div>
-
-            {/* Simulated Live Check Flash Warning */}
-            {testResult && (
-              <div className={`p-3.5 mb-4 border rounded-lg flex items-center justify-between text-xs ${
-                testResult.latency > 0 
-                  ? 'bg-emerald-50 border-emerald-100 text-emerald-800'
-                  : 'bg-rose-50 border-rose-100 text-rose-800'
-              }`}>
-                <div className="flex items-center gap-2">
-                  <Zap className={`w-4 h-4 ${testResult.latency > 0 ? 'text-emerald-500' : 'text-rose-500'}`} />
-                  <div>
-                    <span className="font-bold">Resultado de ping manual: </span>
-                    <span className="font-mono">{testResult.status}</span>
-                  </div>
-                </div>
-                <div className="font-mono font-bold">
-                  {testResult.latency > 0 ? `Latencia: ${testResult.latency}ms` : 'Tiempo agotado (Timeout)'}
-                </div>
-              </div>
-            )}
 
             {history.length === 0 ? (
               <div className="py-16 text-center text-slate-400">Ningún dato disponible en las últimas 24 horas.</div>

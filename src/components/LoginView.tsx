@@ -4,21 +4,22 @@
  */
 
 import React, { useState } from 'react';
-import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, Terminal, ShieldCheck } from 'lucide-react';
+import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { UserSession } from '../types';
+import { api } from '../api';
 
 interface LoginViewProps {
   onLoginSuccess: (user: UserSession) => void;
 }
 
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
-  const [email, setEmail] = useState('laura@monitorpro.io');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
       setError('Por favor, ingresa tu dirección de correo electrónico.');
@@ -27,15 +28,14 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setError('');
     setLoading(true);
 
-    setTimeout(() => {
+    try {
+      const { user } = await api.auth.login(email, password);
+      onLoginSuccess(user);
+    } catch {
+      setError('Credenciales inválidas. Verifica tu correo y contraseña.');
+    } finally {
       setLoading(false);
-      onLoginSuccess({
-        username: 'Laura Martínez',
-        email: email,
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120',
-        role: 'owner'
-      });
-    }, 800);
+    }
   };
 
   return (
@@ -138,17 +138,6 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               )}
             </button>
           </form>
-
-          {/* Quick Info Credentials for Preview */}
-          <div className="mt-8 pt-6 border-t border-slate-800/80 text-center">
-            <span className="text-xs text-slate-500">Credenciales de acceso rápido (modo demostración):</span>
-            <div className="mt-2.5 bg-slate-950/80 border border-slate-800/60 p-2 rounded-lg text-xs font-mono text-indigo-400 flex items-center justify-center gap-1.5">
-              <Terminal className="w-3.5 h-3.5" />
-              <span>laura@monitorpro.io</span>
-              <span className="text-slate-600">/</span>
-              <span>Cualquier contraseña</span>
-            </div>
-          </div>
 
         </div>
       </div>
