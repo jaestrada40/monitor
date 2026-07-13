@@ -1,9 +1,19 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
-import { verifyPassword, signToken, hashPassword, generatePasswordResetToken, hashResetToken } from '../services/auth.service.js';
+import {
+  verifyPassword,
+  signToken,
+  hashPassword,
+  generatePasswordResetToken,
+  hashResetToken,
+  signMfaPendingToken,
+  verifyMfaPendingToken,
+} from '../services/auth.service.js';
 import { sendPasswordResetEmail } from '../services/email.service.js';
+import { generateMfaSecret, verifyMfaToken, generateQrCodeDataUrl } from '../services/mfa.service.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { loginLimiter, forgotPasswordLimiter, resetPasswordLimiter, mfaVerifyLimiter } from '../middleware/rateLimit.js';
 
 export const authRouter = Router();
 const COOKIE_NAME = process.env.COOKIE_NAME || 'monitorpro_session';
@@ -25,13 +35,14 @@ function toUserDto(row: any) {
     username: row.username,
     avatarUrl: row.avatar_url,
     role: row.role,
+    mfaEnabled: row.mfa_enabled,
   };
 }
 
-authRouter.post('/login', asyncHandler(async (req, res) => {
+authRouter.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { email, password } = req.body ?? {};
   const result = await pool.query(
-    'SELECT id, email, username, avatar_url, role, password_hash FROM users WHERE email = $1',
+    'SELECT id, email, username, avatar_url, role, password_hash, mfa_enabled FROM users WHERE email = $1',
     [email]
   );
   const user = result.rows[0];
@@ -40,8 +51,41 @@ authRouter.post('/login', asyncHandler(async (req, res) => {
     return;
   }
 
+  if (user.mfa_enabled) {
+    res.json({ mfaRequired: true, pendingToken: signMfaPendingToken(user.id) });
+    return;
+  }
+
   const token = signToken(user.id);
   res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
+  res.json({ user: toUserDto(user) });
+}));
+
+authRouter.post('/login/mfa', mfaVerifyLimiter, asyncHandler(async (req, res) => {
+  const { pendingToken, token } = req.body ?? {};
+  if (typeof pendingToken !== 'string' || typeof token !== 'string') {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+
+  const pending = verifyMfaPendingToken(pendingToken);
+  if (!pending) {
+    res.status(401).json({ error: 'invalid_or_expired_pending_token' });
+    return;
+  }
+
+  const result = await pool.query(
+    'SELECT id, email, username, avatar_url, role, mfa_enabled, mfa_secret FROM users WHERE id = $1',
+    [pending.userId]
+  );
+  const user = result.rows[0];
+  if (!user || !user.mfa_enabled || !user.mfa_secret || !(await verifyMfaToken(user.mfa_secret, token))) {
+    res.status(401).json({ error: 'invalid_code' });
+    return;
+  }
+
+  const sessionToken = signToken(user.id);
+  res.cookie(COOKIE_NAME, sessionToken, COOKIE_OPTS);
   res.json({ user: toUserDto(user) });
 }));
 
@@ -52,7 +96,7 @@ authRouter.post('/logout', (_req, res) => {
 
 authRouter.get('/me', requireAuth, asyncHandler(async (req, res) => {
   const result = await pool.query(
-    'SELECT id, email, username, avatar_url, role FROM users WHERE id = $1',
+    'SELECT id, email, username, avatar_url, role, mfa_enabled FROM users WHERE id = $1',
     [req.userId]
   );
   if (result.rows.length === 0) {
@@ -62,7 +106,7 @@ authRouter.get('/me', requireAuth, asyncHandler(async (req, res) => {
   res.json({ user: toUserDto(result.rows[0]) });
 }));
 
-authRouter.post('/forgot-password', asyncHandler(async (req, res) => {
+authRouter.post('/forgot-password', forgotPasswordLimiter, asyncHandler(async (req, res) => {
   const { email } = req.body ?? {};
   // Always respond the same way regardless of whether the account exists, so this
   // endpoint can't be used to enumerate registered emails.
@@ -91,7 +135,7 @@ authRouter.post('/forgot-password', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
-authRouter.post('/reset-password', asyncHandler(async (req, res) => {
+authRouter.post('/reset-password', resetPasswordLimiter, asyncHandler(async (req, res) => {
   const { token, newPassword } = req.body ?? {};
   if (typeof token !== 'string' || !token || typeof newPassword !== 'string' || newPassword.length < 8) {
     res.status(400).json({ error: 'invalid_request' });
@@ -127,8 +171,52 @@ authRouter.put('/me/avatar', requireAuth, asyncHandler(async (req, res) => {
     return;
   }
   const result = await pool.query(
-    'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id, email, username, avatar_url, role',
+    'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id, email, username, avatar_url, role, mfa_enabled',
     [avatarUrl, req.userId]
   );
   res.json({ user: toUserDto(result.rows[0]) });
+}));
+
+// --- MFA setup/management (self-service, requires an existing session) ---
+
+authRouter.post('/mfa/setup', requireAuth, asyncHandler(async (req, res) => {
+  const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [req.userId]);
+  const { secret, otpauthUrl } = generateMfaSecret(userResult.rows[0].email);
+  // Stored but mfa_enabled stays false until verify-setup succeeds, so an abandoned
+  // setup never locks the account out.
+  await pool.query('UPDATE users SET mfa_secret = $1 WHERE id = $2', [secret, req.userId]);
+  const qrCodeDataUrl = await generateQrCodeDataUrl(otpauthUrl);
+  res.json({ secret, qrCodeDataUrl });
+}));
+
+authRouter.post('/mfa/verify-setup', requireAuth, mfaVerifyLimiter, asyncHandler(async (req, res) => {
+  const { token } = req.body ?? {};
+  if (typeof token !== 'string') {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+  const result = await pool.query('SELECT mfa_secret FROM users WHERE id = $1', [req.userId]);
+  const secret = result.rows[0]?.mfa_secret;
+  if (!secret || !(await verifyMfaToken(secret, token))) {
+    res.status(401).json({ error: 'invalid_code' });
+    return;
+  }
+  await pool.query('UPDATE users SET mfa_enabled = true WHERE id = $1', [req.userId]);
+  res.json({ ok: true });
+}));
+
+authRouter.post('/mfa/disable', requireAuth, mfaVerifyLimiter, asyncHandler(async (req, res) => {
+  const { token } = req.body ?? {};
+  if (typeof token !== 'string') {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+  const result = await pool.query('SELECT mfa_secret, mfa_enabled FROM users WHERE id = $1', [req.userId]);
+  const row = result.rows[0];
+  if (!row?.mfa_enabled || !row.mfa_secret || !(await verifyMfaToken(row.mfa_secret, token))) {
+    res.status(401).json({ error: 'invalid_code' });
+    return;
+  }
+  await pool.query("UPDATE users SET mfa_enabled = false, mfa_secret = NULL WHERE id = $1", [req.userId]);
+  res.json({ ok: true });
 }));

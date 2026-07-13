@@ -10,9 +10,11 @@ import {
   UserPlus,
   Trash2,
   Pencil,
-  X
+  X,
+  KeyRound,
+  ShieldOff
 } from 'lucide-react';
-import { WorkspaceSettings, UserRole } from '../types';
+import { WorkspaceSettings, UserRole, UserSession } from '../types';
 import { AdminUser } from '../api';
 import { resolveAvatarUrl } from '../avatar';
 import { useToast } from '../toast';
@@ -29,9 +31,16 @@ interface SettingsViewProps {
   onUpdateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) => Promise<void>;
   onRemoveUser: (id: string) => Promise<void>;
   currentUserId: string;
+  user: UserSession;
+  onMfaSetup: () => Promise<{ secret: string; qrCodeDataUrl: string }>;
+  onMfaVerifySetup: (token: string) => Promise<void>;
+  onMfaDisable: (token: string) => Promise<void>;
 }
 
-export default function SettingsView({ settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId }: SettingsViewProps) {
+export default function SettingsView({
+  settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId,
+  user, onMfaSetup, onMfaVerifySetup, onMfaDisable,
+}: SettingsViewProps) {
   const { showToast } = useToast();
   const confirm = useConfirm();
 
@@ -53,6 +62,19 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('editor');
   const [editSaving, setEditSaving] = useState(false);
+
+  // MFA setup modal state
+  const [showMfaSetup, setShowMfaSetup] = useState(false);
+  const [mfaSetupData, setMfaSetupData] = useState<{ secret: string; qrCodeDataUrl: string } | null>(null);
+  const [mfaSetupCode, setMfaSetupCode] = useState('');
+  const [mfaSetupSaving, setMfaSetupSaving] = useState(false);
+  const [mfaSetupError, setMfaSetupError] = useState('');
+
+  // MFA disable modal state
+  const [showMfaDisable, setShowMfaDisable] = useState(false);
+  const [mfaDisableCode, setMfaDisableCode] = useState('');
+  const [mfaDisableSaving, setMfaDisableSaving] = useState(false);
+  const [mfaDisableError, setMfaDisableError] = useState('');
 
   const [membersPage, setMembersPage] = useState(1);
   const pagedUsers = users.slice((membersPage - 1) * PAGE_SIZE, membersPage * PAGE_SIZE);
@@ -135,6 +157,65 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
       showToast(`${member?.username} eliminado del workspace.`, 'success');
     } catch {
       showToast('No se pudo eliminar al usuario. Inténtalo de nuevo.', 'error');
+    }
+  };
+
+  const openMfaSetup = async () => {
+    setShowMfaSetup(true);
+    setMfaSetupError('');
+    setMfaSetupCode('');
+    try {
+      const data = await onMfaSetup();
+      setMfaSetupData(data);
+    } catch {
+      setMfaSetupError('No se pudo iniciar la configuración de MFA. Inténtalo de nuevo.');
+    }
+  };
+
+  const closeMfaSetup = () => {
+    setShowMfaSetup(false);
+    setMfaSetupData(null);
+    setMfaSetupCode('');
+    setMfaSetupError('');
+  };
+
+  const handleMfaSetupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mfaSetupCode.length !== 6) return;
+    setMfaSetupError('');
+    setMfaSetupSaving(true);
+    try {
+      await onMfaVerifySetup(mfaSetupCode);
+      showToast('Autenticación en dos pasos activada.', 'success');
+      closeMfaSetup();
+    } catch {
+      setMfaSetupError('Código incorrecto. Verifica tu app de autenticación e intenta de nuevo.');
+      setMfaSetupCode('');
+    } finally {
+      setMfaSetupSaving(false);
+    }
+  };
+
+  const closeMfaDisable = () => {
+    setShowMfaDisable(false);
+    setMfaDisableCode('');
+    setMfaDisableError('');
+  };
+
+  const handleMfaDisableSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mfaDisableCode.length !== 6) return;
+    setMfaDisableError('');
+    setMfaDisableSaving(true);
+    try {
+      await onMfaDisable(mfaDisableCode);
+      showToast('Autenticación en dos pasos desactivada.', 'success');
+      closeMfaDisable();
+    } catch {
+      setMfaDisableError('Código incorrecto. Inténtalo de nuevo.');
+      setMfaDisableCode('');
+    } finally {
+      setMfaDisableSaving(false);
     }
   };
 
@@ -294,6 +375,50 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
             <Pagination page={membersPage} totalItems={users.length} pageSize={PAGE_SIZE} onPageChange={setMembersPage} />
           </div>
 
+          {/* Security / MFA card */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-slate-300 transition-colors">
+            <div className="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <KeyRound className="w-4 h-4 text-indigo-600" />
+                  Autenticación en Dos Pasos (MFA)
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">Protege tu cuenta ({user.email}) con un código de tu app de autenticación (Google Authenticator, Authy, etc).</p>
+              </div>
+
+              {user.mfaEnabled ? (
+                <span className="px-2.5 py-1 rounded-lg text-[10px] uppercase font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-200/50 flex items-center gap-1 shrink-0">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Activo
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-lg text-[10px] uppercase font-bold font-mono bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
+                  Inactivo
+                </span>
+              )}
+            </div>
+
+            {user.mfaEnabled ? (
+              <button
+                type="button"
+                onClick={() => setShowMfaDisable(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+              >
+                <ShieldOff className="w-3.5 h-3.5" />
+                <span>Desactivar MFA</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openMfaSetup}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Activar MFA</span>
+              </button>
+            )}
+          </div>
+
           {/* Form controls save */}
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <button
@@ -435,6 +560,125 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg font-bold cursor-pointer"
                 >
                   {editSaving ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MFA Setup Modal */}
+      {showMfaSetup && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-sm w-full shadow-2xl overflow-hidden font-sans">
+            <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-white">
+              <h3 className="font-display font-bold text-sm tracking-wide">Activar Autenticación en Dos Pasos</h3>
+              <button onClick={closeMfaSetup} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleMfaSetupSubmit} className="p-6 space-y-4 text-xs font-semibold">
+              {mfaSetupData ? (
+                <>
+                  <p className="text-slate-600 font-medium">Escanea este código QR con tu app de autenticación (Google Authenticator, Authy, etc).</p>
+                  <div className="flex justify-center">
+                    <img src={mfaSetupData.qrCodeDataUrl} alt="Código QR de MFA" className="w-40 h-40 border border-slate-200 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 uppercase mb-1.5">O ingresa esta clave manualmente</label>
+                    <div className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-[11px] text-slate-800 break-all select-all">
+                      {mfaSetupData.secret}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 uppercase mb-1.5">Código de verificación</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoFocus
+                      maxLength={6}
+                      value={mfaSetupCode}
+                      onChange={(e) => setMfaSetupCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-slate-800 tracking-[0.3em] focus:outline-hidden"
+                    />
+                  </div>
+                </>
+              ) : !mfaSetupError ? (
+                <p className="text-slate-500 font-medium">Generando código QR...</p>
+              ) : null}
+
+              {mfaSetupError && (
+                <p className="text-[11px] font-semibold text-rose-600">{mfaSetupError}</p>
+              )}
+
+              <div className="flex gap-3 justify-end pt-3">
+                <button
+                  type="button"
+                  onClick={closeMfaSetup}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!mfaSetupData || mfaSetupSaving || mfaSetupCode.length !== 6}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg font-bold cursor-pointer"
+                >
+                  {mfaSetupSaving ? 'Verificando...' : 'Activar MFA'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MFA Disable Modal */}
+      {showMfaDisable && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-sm w-full shadow-2xl overflow-hidden font-sans">
+            <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-white">
+              <h3 className="font-display font-bold text-sm tracking-wide">Desactivar Autenticación en Dos Pasos</h3>
+              <button onClick={closeMfaDisable} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleMfaDisableSubmit} className="p-6 space-y-4 text-xs font-semibold">
+              <p className="text-slate-600 font-medium">Ingresa el código actual de tu app de autenticación para confirmar la desactivación.</p>
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Código de verificación</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus
+                  maxLength={6}
+                  value={mfaDisableCode}
+                  onChange={(e) => setMfaDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-slate-800 tracking-[0.3em] focus:outline-hidden"
+                />
+              </div>
+
+              {mfaDisableError && (
+                <p className="text-[11px] font-semibold text-rose-600">{mfaDisableError}</p>
+              )}
+
+              <div className="flex gap-3 justify-end pt-3">
+                <button
+                  type="button"
+                  onClick={closeMfaDisable}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={mfaDisableSaving || mfaDisableCode.length !== 6}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white rounded-lg font-bold cursor-pointer"
+                >
+                  {mfaDisableSaving ? 'Desactivando...' : 'Desactivar MFA'}
                 </button>
               </div>
             </form>

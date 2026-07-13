@@ -250,6 +250,16 @@ export default function App() {
             onUpdateUser={handleUpdateUser}
             onRemoveUser={handleRemoveUser}
             currentUserId={user.id}
+            user={user}
+            onMfaSetup={api.auth.mfaSetup}
+            onMfaVerifySetup={async (token) => {
+              await api.auth.mfaVerifySetup(token);
+              setUser({ ...user, mfaEnabled: true });
+            }}
+            onMfaDisable={async (token) => {
+              await api.auth.mfaDisable(token);
+              setUser({ ...user, mfaEnabled: false });
+            }}
           />
         );
       default:

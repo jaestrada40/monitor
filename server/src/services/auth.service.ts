@@ -43,3 +43,20 @@ export function generatePasswordResetToken(): { rawToken: string; tokenHash: str
 export function hashResetToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 }
+
+// Issued after password verification when MFA is enabled — proves the password step
+// passed without yet granting a real session, and can only be redeemed for the second
+// factor (never accepted by requireAuth) thanks to the distinct `purpose` claim.
+export function signMfaPendingToken(userId: string): string {
+  return jwt.sign({ userId, purpose: 'mfa-pending' }, JWT_SECRET, { expiresIn: '5m' });
+}
+
+export function verifyMfaPendingToken(token: string): { userId: string } | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; purpose: string };
+    if (decoded.purpose !== 'mfa-pending') return null;
+    return { userId: decoded.userId };
+  } catch {
+    return null;
+  }
+}

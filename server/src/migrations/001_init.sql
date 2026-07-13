@@ -25,6 +25,11 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super-admin',
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ;
 
+-- mfa_secret is written on setup start but mfa_enabled only flips true once the user
+-- proves they can generate a valid code, so an abandoned setup never blocks login.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT;
+
 CREATE TABLE IF NOT EXISTS websites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

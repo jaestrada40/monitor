@@ -11,6 +11,7 @@ export interface UserSession {
   email: string;
   avatarUrl: string;
   role: UserRole;
+  mfaEnabled: boolean;
 }
 
 export interface Website {

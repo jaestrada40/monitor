@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
+import { generate } from 'otplib';
 import { pool } from '../db.js';
 import { hashPassword } from '../services/auth.service.js';
 import { authRouter } from './auth.routes.js';
@@ -125,5 +126,95 @@ describe('auth routes', () => {
       .post('/api/auth/reset-password')
       .send({ token: 'whatever', newPassword: 'short' });
     expect(res.status).toBe(400);
+  });
+
+  describe('MFA', () => {
+    let mfaCookie: string;
+    let mfaSecret: string;
+
+    beforeAll(async () => {
+      await pool.query("DELETE FROM users WHERE email = 'mfa-test@example.com'");
+      const passwordHash = await hashPassword('mfaTestPass123');
+      await pool.query(
+        `INSERT INTO users (email, password_hash, username, avatar_url) VALUES ($1, $2, $3, $4)`,
+        ['mfa-test@example.com', passwordHash, 'MfaTester', '']
+      );
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'mfa-test@example.com', password: 'mfaTestPass123' });
+      mfaCookie = loginRes.headers['set-cookie'][0];
+    });
+
+    afterAll(async () => {
+      await pool.query("DELETE FROM users WHERE email = 'mfa-test@example.com'");
+    });
+
+    it('sets up MFA and requires a valid code to complete enrollment', async () => {
+      const setupRes = await request(app).post('/api/auth/mfa/setup').set('Cookie', mfaCookie);
+      expect(setupRes.status).toBe(200);
+      expect(setupRes.body.secret).toMatch(/^[A-Z2-7]+$/);
+      expect(setupRes.body.qrCodeDataUrl).toContain('data:image/');
+      mfaSecret = setupRes.body.secret;
+
+      const badVerify = await request(app)
+        .post('/api/auth/mfa/verify-setup')
+        .set('Cookie', mfaCookie)
+        .send({ token: '000000' });
+      expect(badVerify.status).toBe(401);
+
+      const validToken = await generate({ secret: mfaSecret });
+      const goodVerify = await request(app)
+        .post('/api/auth/mfa/verify-setup')
+        .set('Cookie', mfaCookie)
+        .send({ token: validToken });
+      expect(goodVerify.status).toBe(200);
+
+      const me = await request(app).get('/api/auth/me').set('Cookie', mfaCookie);
+      expect(me.body.user.mfaEnabled).toBe(true);
+    });
+
+    it('requires a second-factor code to log in once MFA is enabled', async () => {
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'mfa-test@example.com', password: 'mfaTestPass123' });
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.mfaRequired).toBe(true);
+      expect(loginRes.body.user).toBeUndefined();
+      expect(loginRes.headers['set-cookie']).toBeUndefined();
+
+      const badCode = await request(app)
+        .post('/api/auth/login/mfa')
+        .send({ pendingToken: loginRes.body.pendingToken, token: '000000' });
+      expect(badCode.status).toBe(401);
+
+      const validToken = await generate({ secret: mfaSecret });
+      const goodCode = await request(app)
+        .post('/api/auth/login/mfa')
+        .send({ pendingToken: loginRes.body.pendingToken, token: validToken });
+      expect(goodCode.status).toBe(200);
+      expect(goodCode.body.user.email).toBe('mfa-test@example.com');
+      expect(goodCode.headers['set-cookie']).toBeDefined();
+    });
+
+    it('requires a valid code to disable MFA', async () => {
+      const badDisable = await request(app)
+        .post('/api/auth/mfa/disable')
+        .set('Cookie', mfaCookie)
+        .send({ token: '000000' });
+      expect(badDisable.status).toBe(401);
+
+      const validToken = await generate({ secret: mfaSecret });
+      const goodDisable = await request(app)
+        .post('/api/auth/mfa/disable')
+        .set('Cookie', mfaCookie)
+        .send({ token: validToken });
+      expect(goodDisable.status).toBe(200);
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'mfa-test@example.com', password: 'mfaTestPass123' });
+      expect(loginRes.body.mfaRequired).toBeUndefined();
+      expect(loginRes.body.user.email).toBe('mfa-test@example.com');
+    });
   });
 });

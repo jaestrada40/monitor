@@ -40,7 +40,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   auth: {
     login: (email: string, password: string) =>
-      request<{ user: UserSession }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+      request<{ user: UserSession } | { mfaRequired: true; pendingToken: string }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    loginMfa: (pendingToken: string, token: string) =>
+      request<{ user: UserSession }>('/auth/login/mfa', { method: 'POST', body: JSON.stringify({ pendingToken, token }) }),
     logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),
     me: () => request<{ user: UserSession }>('/auth/me'),
     updateAvatar: (avatarUrl: string) =>
@@ -49,6 +54,11 @@ export const api = {
       request<{ ok: true }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
     resetPassword: (token: string, newPassword: string) =>
       request<{ ok: true }>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
+    mfaSetup: () => request<{ secret: string; qrCodeDataUrl: string }>('/auth/mfa/setup', { method: 'POST' }),
+    mfaVerifySetup: (token: string) =>
+      request<{ ok: true }>('/auth/mfa/verify-setup', { method: 'POST', body: JSON.stringify({ token }) }),
+    mfaDisable: (token: string) =>
+      request<{ ok: true }>('/auth/mfa/disable', { method: 'POST', body: JSON.stringify({ token }) }),
   },
   websites: {
     list: () => request<{ websites: Website[] }>('/websites'),

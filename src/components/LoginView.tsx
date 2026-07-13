@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, ShieldCheck, X } from 'lucide-react';
+import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, ShieldCheck, X, KeyRound } from 'lucide-react';
 import { UserSession } from '../types';
 import { api } from '../api';
 
@@ -24,6 +24,11 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
 
+  const [pendingToken, setPendingToken] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [mfaError, setMfaError] = useState('');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
@@ -34,12 +39,32 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setLoading(true);
 
     try {
-      const { user } = await api.auth.login(email, password);
-      onLoginSuccess(user);
+      const result = await api.auth.login(email, password);
+      if ('mfaRequired' in result) {
+        setPendingToken(result.pendingToken);
+      } else {
+        onLoginSuccess(result.user);
+      }
     } catch {
       setError('Credenciales inválidas. Verifica tu correo y contraseña.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mfaCode.length !== 6) return;
+    setMfaError('');
+    setMfaLoading(true);
+    try {
+      const { user } = await api.auth.loginMfa(pendingToken, mfaCode);
+      onLoginSuccess(user);
+    } catch {
+      setMfaError('Código incorrecto o expirado. Intenta de nuevo.');
+      setMfaCode('');
+    } finally {
+      setMfaLoading(false);
     }
   };
 
@@ -83,10 +108,67 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
 
           {/* Form Header */}
           <div className="mb-8">
-            <h1 className="text-2xl font-display font-bold text-white tracking-tight">Acceso al Centro de Control</h1>
-            <p className="text-sm text-slate-400 mt-1.5">Monitoreo de infraestructura global y respuesta ante incidentes.</p>
+            <h1 className="text-2xl font-display font-bold text-white tracking-tight">
+              {pendingToken ? 'Verificación en dos pasos' : 'Acceso al Centro de Control'}
+            </h1>
+            <p className="text-sm text-slate-400 mt-1.5">
+              {pendingToken
+                ? 'Ingresa el código de 6 dígitos de tu app de autenticación.'
+                : 'Monitoreo de infraestructura global y respuesta ante incidentes.'}
+            </p>
           </div>
 
+          {pendingToken ? (
+            <>
+              {mfaError && (
+                <div className="p-3 mb-6 bg-rose-950/40 border border-rose-900/40 rounded-lg flex items-start gap-2.5 text-xs text-rose-300">
+                  <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{mfaError}</span>
+                </div>
+              )}
+              <form onSubmit={handleMfaSubmit} className="space-y-5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Código de verificación</label>
+                  <div className="relative group">
+                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                    <input
+                      id="login-mfa-code"
+                      type="text"
+                      inputMode="numeric"
+                      autoFocus
+                      maxLength={6}
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-sm font-medium text-white placeholder-slate-600 focus:outline-hidden focus:border-indigo-500 focus:bg-slate-950 transition-all tracking-[0.3em]"
+                      placeholder="000000"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={mfaLoading || mfaCode.length !== 6}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:bg-indigo-800/50 text-white rounded-lg text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 cursor-pointer"
+                >
+                  {mfaLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <span>Verificando...</span>
+                    </>
+                  ) : (
+                    <span>Verificar código</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPendingToken(''); setMfaCode(''); setMfaError(''); }}
+                  className="w-full text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                >
+                  Volver al inicio de sesión
+                </button>
+              </form>
+            </>
+          ) : (
+          <>
           {error && (
             <div className="p-3 mb-6 bg-rose-950/40 border border-rose-900/40 rounded-lg flex items-start gap-2.5 text-xs text-rose-300">
               <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
@@ -169,6 +251,8 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               )}
             </button>
           </form>
+          </>
+          )}
 
         </div>
       </div>
