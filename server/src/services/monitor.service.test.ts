@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { pool } from '../db.js';
 import { checkWebsite } from './monitor.service.js';
 
+// Avoid real TLS handshakes against example.com during tests — SSL checking is covered
+// separately by ssl.service.test.ts.
+vi.mock('./ssl.service.js', () => ({
+  checkSsl: vi.fn().mockResolvedValue({ status: 'none', expiryDays: 0, issuer: '' }),
+}));
+
 describe('monitor.service', () => {
   let websiteId: string;
   let userId: string;
@@ -26,7 +32,7 @@ describe('monitor.service', () => {
 
   it('records a successful check and keeps the site up', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
-    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500 });
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
     const checks = await pool.query('SELECT value_ms FROM response_time_checks WHERE website_id = $1', [websiteId]);
     expect(checks.rows.length).toBe(1);
@@ -39,7 +45,7 @@ describe('monitor.service', () => {
 
   it('creates a critical incident and marks the site down after a failed check with retry', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
-    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500 });
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
     const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
     expect(site.rows[0].status).toBe('down');
@@ -65,7 +71,7 @@ describe('monitor.service', () => {
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [websiteId]);
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
-    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'down', thresholdResponseTime: 500 });
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'down', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
     const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
     expect(site.rows[0].status).toBe('up');

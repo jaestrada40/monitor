@@ -317,7 +317,9 @@ export default function DetailsView({
                       <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
                       <span>Certificado Válido</span>
                     </div>
-                    <p className="text-[10px] text-slate-500 font-medium">Sello: Let's Encrypt Authority. Expiración en {website.sslExpiryDays} días.</p>
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      {website.sslIssuer ? `Emitido por: ${website.sslIssuer}. ` : ''}Expiración en {website.sslExpiryDays} días.
+                    </p>
                   </div>
                 )}
 
@@ -345,9 +347,11 @@ export default function DetailsView({
                   <div>
                     <div className="flex items-center gap-1.5 font-bold text-slate-500">
                       <XCircle className="w-4 h-4 text-slate-400" />
-                      <span>Sin SSL Configurado</span>
+                      <span>Sin datos de SSL</span>
                     </div>
-                    <p className="text-[10px] text-slate-400">Endpoint no utiliza el protocolo seguro HTTPS.</p>
+                    <p className="text-[10px] text-slate-400">
+                      El sitio no usa HTTPS, o aún no se ha completado un chequeo de certificado.
+                    </p>
                   </div>
                 )}
               </div>

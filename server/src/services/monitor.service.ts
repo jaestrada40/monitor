@@ -1,12 +1,14 @@
 import type { Pool } from 'pg';
 import { chromium, type Browser } from 'playwright';
 import { sendIncidentEmail } from './email.service.js';
+import { checkSsl } from './ssl.service.js';
 
 interface WebsiteCheckTarget {
   id: string;
   url: string;
   status: string;
   thresholdResponseTime: number;
+  thresholdSslDays: number;
 }
 
 const BROWSER_USER_AGENT =
@@ -151,6 +153,12 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   const valueMs = result.ok ? result.ms : -1;
   await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, $2)', [website.id, valueMs]);
   await pool.query('UPDATE websites SET last_checked = now() WHERE id = $1', [website.id]);
+
+  const ssl = await checkSsl(website.url, website.thresholdSslDays);
+  await pool.query(
+    'UPDATE websites SET ssl_status = $1, ssl_expiry_days = $2, ssl_issuer = $3 WHERE id = $4',
+    [ssl.status, ssl.expiryDays, ssl.issuer, website.id]
+  );
 
   if (!result.ok) {
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);

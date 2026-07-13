@@ -5,7 +5,7 @@ import { checkWebsite } from './monitor.service.js';
 export function startScheduler(pool: Pool) {
   cron.schedule('* * * * *', async () => {
     const due = await pool.query(
-      `SELECT w.id, w.url, w.status, w.check_interval, w.last_checked, n.threshold_response_time
+      `SELECT w.id, w.url, w.status, w.check_interval, w.last_checked, n.threshold_response_time, n.threshold_ssl_days
        FROM websites w
        JOIN notification_settings n ON n.user_id = w.user_id
        WHERE w.status != 'maintenance'
@@ -19,6 +19,7 @@ export function startScheduler(pool: Pool) {
           url: row.url,
           status: row.status,
           thresholdResponseTime: row.threshold_response_time,
+          thresholdSslDays: row.threshold_ssl_days,
         });
       } catch (err) {
         console.error(`Monitoring check failed for website ${row.id}:`, err);

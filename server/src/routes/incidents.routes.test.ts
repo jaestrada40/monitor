@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -7,6 +7,14 @@ import { hashPassword } from '../services/auth.service.js';
 import { authRouter } from './auth.routes.js';
 import { websitesRouter } from './websites.routes.js';
 import { incidentsRouter } from './incidents.routes.js';
+
+// Resolving an incident now triggers a real background recheck (monitor.service.checkWebsite)
+// — avoid a real TLS handshake against example.com during tests.
+vi.mock('../services/ssl.service.js', () => ({
+  checkSsl: vi.fn().mockResolvedValue({ status: 'none', expiryDays: 0, issuer: '' }),
+}));
+
+const flushBackgroundRecheck = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 async function createTestUser(email: string, username: string) {
   const passwordHash = await hashPassword('testpass123');
@@ -70,6 +78,8 @@ describe('incidents routes', () => {
   });
 
   it('acknowledges then resolves an incident, computing duration', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+
     const ackRes = await request(app).post(`/api/incidents/${incidentId}/acknowledge`).set('Cookie', cookie);
     expect(ackRes.status).toBe(200);
     expect(ackRes.body.incident.status).toBe('acknowledged');
@@ -79,6 +89,38 @@ describe('incidents routes', () => {
     expect(resolveRes.status).toBe(200);
     expect(resolveRes.body.incident.status).toBe('resolved');
     expect(resolveRes.body.incident.duration).toBeTruthy();
+
+    await flushBackgroundRecheck();
+    const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('up');
+    vi.unstubAllGlobals();
+  });
+
+  it('reopens a fresh incident immediately if the site is still broken when resolved', async () => {
+    const brokenIncident = await pool.query(
+      `INSERT INTO incidents (website_id, title, severity, status, description)
+       VALUES ($1, 'Sitio no responde', 'critical', 'active', 'desc') RETURNING id`,
+      [websiteId]
+    );
+    const brokenIncidentId = brokenIncident.rows[0].id;
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
+
+    const resolveRes = await request(app).post(`/api/incidents/${brokenIncidentId}/resolve`).set('Cookie', cookie);
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.incident.status).toBe('resolved');
+
+    await flushBackgroundRecheck();
+
+    const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('down');
+
+    const freshIncident = await pool.query(
+      "SELECT id FROM incidents WHERE website_id = $1 AND status = 'active' AND id != $2",
+      [websiteId, brokenIncidentId]
+    );
+    expect(freshIncident.rows.length).toBe(1);
+    vi.unstubAllGlobals();
   });
 
   it('prevents cross-user access to another user\'s incident', async () => {

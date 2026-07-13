@@ -98,4 +98,29 @@ describe('websites routes', () => {
       .set('Cookie', otherCookie);
     expect(deleteRes.status).toBe(404);
   });
+
+  it('computes a global latency history scoped to the user, averaging only successful checks', async () => {
+    const createRes = await request(app)
+      .post('/api/websites')
+      .set('Cookie', cookie)
+      .send({ name: 'Latency Site', url: 'https://latency.example.com', checkInterval: 60 });
+    const websiteId = createRes.body.website.id;
+
+    await pool.query(
+      `INSERT INTO response_time_checks (website_id, value_ms, "timestamp") VALUES
+       ($1, 100, now() - interval '2 hours'),
+       ($1, 300, now() - interval '2 hours'),
+       ($1, -1, now() - interval '2 hours')`,
+      [websiteId]
+    );
+
+    const res = await request(app).get('/api/websites/latency-history').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    const bucket = res.body.points.find((p: any) => p.value === 200);
+    expect(bucket).toBeTruthy();
+
+    const otherRes = await request(app).get('/api/websites/latency-history').set('Cookie', otherCookie);
+    expect(otherRes.status).toBe(200);
+    expect(otherRes.body.points.some((p: any) => p.value === 200)).toBe(false);
+  });
 });

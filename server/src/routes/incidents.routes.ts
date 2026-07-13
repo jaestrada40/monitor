@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { checkWebsite } from '../services/monitor.service.js';
 
 export const incidentsRouter = Router();
 incidentsRouter.use(requireAuth);
@@ -73,7 +74,30 @@ incidentsRouter.post('/:id/resolve', asyncHandler(async (req, res) => {
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [result.rows[0].website_id]);
+
+  // Don't just assume the site recovered — run a real check now so the website's status
+  // (and a fresh incident, if it's still actually broken) reflects reality immediately,
+  // instead of trusting the manual resolve until the next scheduler tick.
+  const websiteResult = await pool.query(
+    `SELECT w.id, w.url, w.status, n.threshold_response_time, n.threshold_ssl_days
+     FROM websites w JOIN notification_settings n ON n.user_id = w.user_id
+     WHERE w.id = $1`,
+    [result.rows[0].website_id]
+  );
+  if (websiteResult.rows.length > 0) {
+    const w = websiteResult.rows[0];
+    // Fire-and-forget: don't make the user wait on a real network check just to see the
+    // "resolved" confirmation. The frontend re-polls shortly after and will pick up
+    // whatever this determines (including a fresh incident if the site is still broken).
+    checkWebsite(pool, {
+      id: w.id,
+      url: w.url,
+      status: 'up',
+      thresholdResponseTime: w.threshold_response_time,
+      thresholdSslDays: w.threshold_ssl_days,
+    }).catch((err) => console.error(`Post-resolve recheck failed for website ${w.id}:`, err));
+  }
+
   const withName = await pool.query(`${SELECT_WITH_WEBSITE_NAME} WHERE i.id = $1`, [req.params.id]);
   res.json({ incident: toIncidentDto(withName.rows[0]) });
 }));

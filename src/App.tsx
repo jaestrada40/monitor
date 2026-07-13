@@ -36,6 +36,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [latencyHistory, setLatencyHistory] = useState<{ timestamp: string; value: number }[]>([]);
   const [currentView, setCurrentView] = usePersistentState<ViewType>('current_view', 'dashboard');
   const [selectedWebsiteId, setSelectedWebsiteId] = useState<string | null>(null);
 
@@ -56,6 +57,7 @@ export default function App() {
     const loadDomainData = () => {
       api.websites.list().then(({ websites }) => setWebsites(websites));
       api.incidents.list().then(({ incidents }) => setIncidents(incidents));
+      api.websites.latencyHistory().then(({ points }) => setLatencyHistory(points));
     };
 
     loadDomainData();
@@ -111,12 +113,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleAddWebsite = async (newWeb: Omit<Website, 'id' | 'responseTimeHistory' | 'lastChecked'>) => {
+  const handleAddWebsite = async (newWeb: Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>) => {
     const { website } = await api.websites.create(newWeb);
     setWebsites([website, ...websites]);
   };
 
-  const handleEditWebsite = async (updatedWeb: Website) => {
+  const handleEditWebsite = async (updatedWeb: Pick<Website, 'id' | 'name' | 'url' | 'checkInterval' | 'tags'>) => {
     const { website } = await api.websites.update(updatedWeb.id, updatedWeb);
     setWebsites(websites.map((w) => (w.id === website.id ? website : w)));
   };
@@ -144,10 +146,15 @@ export default function App() {
   };
 
   const handleResolveIncident = async (id: string) => {
-    const { incident } = await api.incidents.resolve(id);
-    setIncidents(incidents.map((i) => (i.id === id ? incident : i)));
-    const { websites: refreshed } = await api.websites.list();
-    setWebsites(refreshed);
+    // The backend runs a real check as part of resolving, which can open a fresh incident
+    // immediately if the site is still actually broken — refresh both lists to reflect that.
+    await api.incidents.resolve(id);
+    const [{ incidents: refreshedIncidents }, { websites: refreshedWebsites }] = await Promise.all([
+      api.incidents.list(),
+      api.websites.list(),
+    ]);
+    setIncidents(refreshedIncidents);
+    setWebsites(refreshedWebsites);
   };
 
   const handleAddUser = async (data: { email: string; username: string; role: UserRole }) => {
@@ -187,6 +194,7 @@ export default function App() {
             websites={websites}
             incidents={incidents}
             notifications={notifications!}
+            latencyHistory={latencyHistory}
             onNavigateToView={handleNavigateToView}
             onAcknowledgeIncident={handleAcknowledgeIncident}
             onResolveIncident={handleResolveIncident}
@@ -261,6 +269,7 @@ export default function App() {
             websites={websites}
             incidents={incidents}
             notifications={notifications!}
+            latencyHistory={latencyHistory}
             onNavigateToView={handleNavigateToView}
             onAcknowledgeIncident={handleAcknowledgeIncident}
             onResolveIncident={handleResolveIncident}
@@ -295,11 +304,15 @@ export default function App() {
 
       {/* Main Page Area Container */}
       <div className="flex-1 pl-64 min-w-0">
-        <TopNavBar 
+        <TopNavBar
           user={user}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onQuickAdd={handleQuickAddTrigger}
+          totalWebsites={websites.length}
+          upWebsites={websites.filter((w) => w.status === 'up').length}
+          criticalIncidents={incidents.filter((i) => i.status !== 'resolved' && i.severity === 'critical').length}
+          warningIncidents={incidents.filter((i) => i.status !== 'resolved' && i.severity === 'warning').length}
         />
 
         {/* Scrolling body offset for fixed top nav (16px bottom padding for bento look) */}

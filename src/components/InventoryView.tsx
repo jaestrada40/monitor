@@ -20,7 +20,6 @@ import {
   AlertCircle, 
   Clock, 
   ExternalLink,
-  MapPin,
   Tag,
   CalendarDays,
   ShieldAlert,
@@ -31,8 +30,8 @@ import { Website } from '../types';
 
 interface InventoryViewProps {
   websites: Website[];
-  onAddWebsite: (website: Omit<Website, 'id' | 'responseTimeHistory' | 'lastChecked'>) => void;
-  onEditWebsite: (website: Website) => void;
+  onAddWebsite: (website: Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>) => void;
+  onEditWebsite: (website: Pick<Website, 'id' | 'name' | 'url' | 'checkInterval' | 'tags'>) => void;
   onDeleteWebsite: (id: string) => void;
   onToggleStatus: (id: string) => void; // toggle between Up/Maintenance
   onNavigateToDetails: (id: string) => void;
@@ -60,8 +59,6 @@ export default function InventoryView({
   const [newSiteUrl, setNewSiteUrl] = useState('');
   const [newSiteInterval, setNewSiteInterval] = useState(30);
   const [newSiteTags, setNewSiteTags] = useState('');
-  const [newSiteLocations, setNewSiteLocations] = useState<string[]>(['US-East']);
-  const [newSiteSsl, setNewSiteSsl] = useState<'valid' | 'none'>('valid');
 
   // Edit states
   const [editingSite, setEditingSite] = useState<Website | null>(null);
@@ -96,14 +93,7 @@ export default function InventoryView({
     onAddWebsite({
       name: newSiteName,
       url: newSiteUrl,
-      status: 'up',
-      uptime24h: 100.0,
-      uptime30d: 100.0,
-      responseTime: 110,
-      sslStatus: newSiteSsl,
-      sslExpiryDays: newSiteSsl === 'valid' ? 90 : 0,
       checkInterval: Number(newSiteInterval),
-      locations: newSiteLocations,
       tags: newSiteTags.split(',').map(t => t.trim()).filter(Boolean)
     });
 
@@ -112,8 +102,6 @@ export default function InventoryView({
     setNewSiteUrl('');
     setNewSiteInterval(30);
     setNewSiteTags('');
-    setNewSiteLocations(['US-East']);
-    setNewSiteSsl('valid');
     setIsModalOpen(false);
   };
 
@@ -273,12 +261,8 @@ export default function InventoryView({
                   </div>
                 </div>
 
-                {/* Locations and SSL indicators */}
+                {/* SSL indicators */}
                 <div className="space-y-2 text-[11px] text-slate-500 font-medium">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Sondas: {web.locations.join(', ')}</span>
-                  </div>
                   <div className="flex items-center gap-2">
                     <Clock className="w-3.5 h-3.5 text-slate-400" />
                     <span>Frecuencia: Cada {web.checkInterval}s</span>
@@ -506,56 +490,17 @@ export default function InventoryView({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-600 uppercase mb-1.5">Intervalo de Prueba</label>
-                  <select
-                    value={newSiteInterval}
-                    onChange={(e) => setNewSiteInterval(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white cursor-pointer"
-                  >
-                    <option value={30}>Cada 30s (Súper rápido)</option>
-                    <option value={60}>Cada 60s (Estándar)</option>
-                    <option value={300}>Cada 5min (Ahorro)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-600 uppercase mb-1.5">Certificado SSL</label>
-                  <select
-                    value={newSiteSsl}
-                    onChange={(e) => setNewSiteSsl(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white cursor-pointer"
-                  >
-                    <option value="valid">Auto-Verificar SSL</option>
-                    <option value="none">Omitir Validación</option>
-                  </select>
-                </div>
-              </div>
-
               <div>
-                <label className="block text-slate-600 uppercase mb-1.5">Sondas Regionales (Probes)</label>
-                <div className="grid grid-cols-3 gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
-                  {['US-East', 'EU-West', 'AP-South'].map(loc => {
-                    const isChecked = newSiteLocations.includes(loc);
-                    return (
-                      <label key={loc} className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {
-                            if (isChecked) {
-                              setNewSiteLocations(newSiteLocations.filter(l => l !== loc));
-                            } else {
-                              setNewSiteLocations([...newSiteLocations, loc]);
-                            }
-                          }}
-                          className="rounded-xs text-indigo-600 focus:ring-indigo-600/20"
-                        />
-                        <span>{loc}</span>
-                      </label>
-                    );
-                  })}
-                </div>
+                <label className="block text-slate-600 uppercase mb-1.5">Intervalo de Prueba</label>
+                <select
+                  value={newSiteInterval}
+                  onChange={(e) => setNewSiteInterval(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white cursor-pointer"
+                >
+                  <option value={30}>Cada 30s (Súper rápido)</option>
+                  <option value={60}>Cada 60s (Estándar)</option>
+                  <option value={300}>Cada 5min (Ahorro)</option>
+                </select>
               </div>
 
               <div>
@@ -621,31 +566,17 @@ export default function InventoryView({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-600 uppercase mb-1.5">Intervalo de Prueba</label>
-                  <select
-                    value={editingSite.checkInterval}
-                    onChange={(e) => setEditingSite({ ...editingSite, checkInterval: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white cursor-pointer"
-                  >
-                    <option value={30}>Cada 30s</option>
-                    <option value={60}>Cada 60s</option>
-                    <option value={300}>Cada 5min</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-600 uppercase mb-1.5">Uptime Manual (%)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={editingSite.uptime30d}
-                    onChange={(e) => setEditingSite({ ...editingSite, uptime30d: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
-                  />
-                </div>
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Intervalo de Prueba</label>
+                <select
+                  value={editingSite.checkInterval}
+                  onChange={(e) => setEditingSite({ ...editingSite, checkInterval: Number(e.target.value) })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white cursor-pointer"
+                >
+                  <option value={30}>Cada 30s</option>
+                  <option value={60}>Cada 60s</option>
+                  <option value={300}>Cada 5min</option>
+                </select>
               </div>
 
               <div className="flex gap-3 justify-end pt-3">

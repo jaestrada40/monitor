@@ -24,9 +24,9 @@ export interface Website {
   responseTimeHistory: { timestamp: string; value: number }[];
   sslStatus: 'valid' | 'expiring' | 'expired' | 'none';
   sslExpiryDays: number;
+  sslIssuer: string;
   lastChecked: string;
   checkInterval: number; // in seconds
-  locations: string[];
   tags: string[];
 }
 

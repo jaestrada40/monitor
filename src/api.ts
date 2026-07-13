@@ -43,12 +43,13 @@ export const api = {
   },
   websites: {
     list: () => request<{ websites: Website[] }>('/websites'),
-    create: (data: Omit<Website, 'id' | 'responseTimeHistory' | 'lastChecked' | 'uptime24h' | 'uptime30d' | 'responseTime'>) =>
+    create: (data: Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>) =>
       request<{ website: Website }>('/websites', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<Website>) =>
+    update: (id: string, data: Partial<Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>>) =>
       request<{ website: Website }>(`/websites/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     remove: (id: string) => request<{ ok: true }>(`/websites/${id}`, { method: 'DELETE' }),
     toggleStatus: (id: string) => request<{ website: Website }>(`/websites/${id}/toggle-status`, { method: 'POST' }),
+    latencyHistory: () => request<{ points: { timestamp: string; value: number }[] }>('/websites/latency-history'),
   },
   incidents: {
     list: () => request<{ incidents: Incident[] }>('/incidents'),

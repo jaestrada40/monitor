@@ -16,10 +16,10 @@ function toWebsiteDto(row: any, stats: { uptime24h: number; uptime30d: number; l
     url: row.url,
     status: row.status,
     checkInterval: row.check_interval,
-    locations: row.locations,
     tags: row.tags,
     sslStatus: row.ssl_status,
     sslExpiryDays: row.ssl_expiry_days,
+    sslIssuer: row.ssl_issuer,
     lastChecked: row.last_checked,
     uptime24h: stats.uptime24h,
     uptime30d: stats.uptime30d,
@@ -36,8 +36,25 @@ websitesRouter.get('/', asyncHandler(async (req, res) => {
   res.json({ websites });
 }));
 
+websitesRouter.get('/latency-history', asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `SELECT date_trunc('hour', c."timestamp") AS bucket, AVG(c.value_ms) AS avg_ms
+     FROM response_time_checks c
+     JOIN websites w ON w.id = c.website_id
+     WHERE w.user_id = $1 AND c.value_ms >= 0 AND c."timestamp" > now() - interval '24 hours'
+     GROUP BY bucket
+     ORDER BY bucket ASC`,
+    [req.userId]
+  );
+  const points = result.rows.map((row) => ({
+    timestamp: new Date(row.bucket).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    value: Math.round(Number(row.avg_ms)),
+  }));
+  res.json({ points });
+}));
+
 websitesRouter.post('/', asyncHandler(async (req, res) => {
-  const { name, url, checkInterval, locations, tags } = req.body ?? {};
+  const { name, url, checkInterval, tags } = req.body ?? {};
   if (typeof name !== 'string' || !name.trim()) {
     res.status(400).json({ error: 'invalid_name' });
     return;
@@ -49,15 +66,15 @@ websitesRouter.post('/', asyncHandler(async (req, res) => {
     return;
   }
   const result = await pool.query(
-    `INSERT INTO websites (user_id, name, url, check_interval, locations, tags)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [req.userId, name, url, checkInterval || 60, JSON.stringify(locations || []), JSON.stringify(tags || [])]
+    `INSERT INTO websites (user_id, name, url, check_interval, tags)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [req.userId, name, url, checkInterval || 60, JSON.stringify(tags || [])]
   );
   res.status(201).json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
 }));
 
 websitesRouter.put('/:id', asyncHandler(async (req, res) => {
-  const { name, url, checkInterval, locations, tags } = req.body ?? {};
+  const { name, url, checkInterval, tags } = req.body ?? {};
   if (url !== undefined) {
     try {
       new URL(url);
@@ -68,10 +85,9 @@ websitesRouter.put('/:id', asyncHandler(async (req, res) => {
   }
   const result = await pool.query(
     `UPDATE websites SET name = COALESCE($1, name), url = COALESCE($2, url),
-       check_interval = COALESCE($3, check_interval),
-       locations = COALESCE($4, locations), tags = COALESCE($5, tags)
-     WHERE id = $6 AND user_id = $7 RETURNING *`,
-    [name, url, checkInterval, locations ? JSON.stringify(locations) : null, tags ? JSON.stringify(tags) : null, req.params.id, req.userId]
+       check_interval = COALESCE($3, check_interval), tags = COALESCE($4, tags)
+     WHERE id = $5 AND user_id = $6 RETURNING *`,
+    [name, url, checkInterval, tags ? JSON.stringify(tags) : null, req.params.id, req.userId]
   );
   if (result.rows.length === 0) {
     res.status(404).json({ error: 'not_found' });

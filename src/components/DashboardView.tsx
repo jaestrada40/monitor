@@ -3,24 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  Activity, 
-  Globe, 
-  AlertTriangle, 
-  ShieldCheck, 
-  CheckCircle2, 
-  XCircle, 
-  AlertCircle, 
-  Clock, 
-  Server, 
-  Bell, 
-  ArrowUpRight, 
-  ArrowDownRight,
-  TrendingDown,
-  Terminal,
-  ChevronRight,
-  Play
+import React from 'react';
+import {
+  AlertTriangle,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Clock,
+  Bell,
+  ChevronRight
 } from 'lucide-react';
 import { Website, Incident, NotificationSettings } from '../types';
 
@@ -28,6 +20,7 @@ interface DashboardViewProps {
   websites: Website[];
   incidents: Incident[];
   notifications: NotificationSettings;
+  latencyHistory: { timestamp: string; value: number }[];
   onNavigateToView: (view: any, extraData?: any) => void;
   onAcknowledgeIncident: (id: string) => void;
   onResolveIncident: (id: string) => void;
@@ -37,22 +30,11 @@ export default function DashboardView({
   websites,
   incidents,
   notifications,
+  latencyHistory,
   onNavigateToView,
   onAcknowledgeIncident,
   onResolveIncident
 }: DashboardViewProps) {
-  
-  // Operational checklist states
-  const [tasks, setTasks] = useState([
-    { id: 1, text: 'Revisar certificados SSL vencidos en Servidor de Logs', done: false, priority: 'Alta' },
-    { id: 2, text: 'Optimizar consultas SQL lentas en el Clúster de Base de Datos', done: false, priority: 'Media' },
-    { id: 3, text: 'Confirmar recepción de webhook de Slack de prueba', done: true, priority: 'Baja' },
-    { id: 4, text: 'Rotar token de API de seguridad mensual', done: false, priority: 'Alta' }
-  ]);
-
-  const toggleTask = (id: number) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, done: !t.done } : t));
-  };
 
   // Compute metrics
   const totalWebsites = websites.length;
@@ -80,19 +62,11 @@ export default function DashboardView({
     notifications.telegram && 'Telegram'
   ].filter(Boolean);
 
-  // Custom Interactive Chart data (using a default historical response times)
-  const chartPoints = [
-    { label: '00:00', val: 120 },
-    { label: '04:00', val: 135 },
-    { label: '08:00', val: 168 },
-    { label: '12:00', val: 140 },
-    { label: '16:00', val: 195 },
-    { label: '20:00', val: 240 }, // Spike due to DB Latency
-    { label: '24:00', val: 154 }
-  ];
+  // Real latency history, averaged per hour across all monitored sites (server-computed).
+  const chartPoints = latencyHistory.map((p) => ({ label: p.timestamp, val: p.value }));
 
-  const maxVal = Math.max(...chartPoints.map(p => p.val));
-  const minVal = Math.min(...chartPoints.map(p => p.val));
+  const maxVal = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.val)) : 0;
+  const minVal = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.val)) : 0;
 
   // Create SVG path coordinates
   const width = 600;
@@ -101,7 +75,7 @@ export default function DashboardView({
   const paddingY = 20;
 
   const pointsString = chartPoints.map((p, i) => {
-    const x = paddingX + (i * (width - 2 * paddingX)) / (chartPoints.length - 1);
+    const x = paddingX + (i * (width - 2 * paddingX)) / (Math.max(chartPoints.length - 1, 1));
     const y = height - paddingY - ((p.val - minVal) * (height - 2 * paddingY)) / (maxVal - minVal || 1);
     return `${x},${y}`;
   }).join(' ');
@@ -149,9 +123,7 @@ export default function DashboardView({
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-3">
-            <span className="text-emerald-600 font-bold flex items-center gap-0.5">
-              <ArrowUpRight className="w-3.5 h-3.5" /> +0.02%
-            </span>
+            <span className="font-medium text-slate-600">{activeWebsites}/{totalWebsites} sitios arriba</span>
             <span>Objetivo: &ge;99.9%</span>
           </div>
         </div>
@@ -168,10 +140,7 @@ export default function DashboardView({
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-3">
-            <span className="text-indigo-600 font-bold flex items-center gap-0.5">
-              <TrendingDown className="w-3.5 h-3.5" /> -12ms ayer
-            </span>
-            <span>Estable (6 probes)</span>
+            <span className="font-medium text-slate-600">Basado en {upWebsites.length} sitio{upWebsites.length !== 1 ? 's' : ''} activo{upWebsites.length !== 1 ? 's' : ''}</span>
           </div>
         </div>
 
@@ -234,7 +203,7 @@ export default function DashboardView({
         <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
           <div>
             <h3 className="text-sm font-bold text-slate-900">Latencia Histórica Global</h3>
-            <p className="text-xs text-slate-500">Promedio ponderado de respuesta sintética de los últimos 24 horas.</p>
+            <p className="text-xs text-slate-500">Promedio real por hora, calculado sobre todos los sitios monitoreados en las últimas 24 horas.</p>
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-100 text-indigo-700 font-mono font-bold">
@@ -247,9 +216,18 @@ export default function DashboardView({
         </div>
 
         {/* Custom SVG Line Graph */}
+        {chartPoints.length === 0 ? (
+          <div className="py-12 flex flex-col items-center justify-center text-center">
+            <Clock className="w-8 h-8 text-slate-300 mb-2.5 stroke-[1.5]" />
+            <p className="text-xs font-semibold text-slate-800">Aún no hay suficiente historial</p>
+            <p className="text-[11px] text-slate-500 max-w-[280px] mt-1">
+              El motor de monitoreo empezará a mostrar aquí el promedio real de latencia a medida que acumule checks.
+            </p>
+          </div>
+        ) : (
         <div className="relative pt-2">
-          <svg 
-            viewBox={`0 0 ${width} ${height}`} 
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
             className="w-full h-44 text-indigo-600"
             preserveAspectRatio="none"
           >
@@ -284,7 +262,7 @@ export default function DashboardView({
 
             {/* Dots for points */}
             {chartPoints.map((p, i) => {
-              const x = paddingX + (i * (width - 2 * paddingX)) / (chartPoints.length - 1);
+              const x = paddingX + (i * (width - 2 * paddingX)) / (Math.max(chartPoints.length - 1, 1));
               const y = height - paddingY - ((p.val - minVal) * (height - 2 * paddingY)) / (maxVal - minVal || 1);
               const isSpike = p.val === maxVal;
               return (
@@ -310,13 +288,13 @@ export default function DashboardView({
             {chartPoints.map((p, i) => <span key={i}>{p.label}</span>)}
           </div>
         </div>
+        )}
       </div>
 
-      {/* Double Column Row: Recientes Incidentes + Website Health */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        
-        {/* Col 1 (7 cols): Recent Active Incidents */}
-        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl shadow-2xs p-5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+      {/* Recent Active Incidents (full width now that the DevOps checklist column is gone) */}
+      <div className="grid grid-cols-1 gap-5">
+
+        <div className="bg-white border border-slate-200 rounded-xl shadow-2xs p-5 flex flex-col justify-between hover:border-slate-300 transition-colors">
           <div>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
@@ -395,78 +373,12 @@ export default function DashboardView({
             )}
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>Sonda base: <strong>AWS eu-central-1 (Frankfurt)</strong></span>
-            <button 
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end text-xs text-slate-500">
+            <button
               onClick={() => onNavigateToView('incidents')}
               className="text-indigo-600 font-semibold hover:underline flex items-center gap-0.5"
             >
               Historial completo <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Col 2 (5 cols): Operational checklist */}
-        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl shadow-2xs p-5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-indigo-600" />
-                Lista de Operaciones DevOps
-              </h3>
-              <span className="text-[10px] font-mono text-slate-500">
-                {tasks.filter(t => t.done).length}/{tasks.length} COMPLETADO
-              </span>
-            </div>
-
-            <div className="space-y-2.5">
-              {tasks.map((task) => (
-                <div 
-                  key={task.id} 
-                  onClick={() => toggleTask(task.id)}
-                  className={`flex items-start gap-3 p-2.5 rounded-lg border text-xs cursor-pointer select-none transition-colors ${
-                    task.done 
-                      ? 'bg-slate-50/70 border-slate-100 text-slate-400 line-through' 
-                      : 'bg-white border-slate-100 hover:border-slate-200 text-slate-800'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={task.done}
-                    onChange={() => {}} // toggled on container click
-                    className="mt-0.5 rounded-xs text-indigo-600 focus:ring-indigo-600/20 cursor-pointer w-3.5 h-3.5"
-                  />
-                  <div className="flex-1 space-y-0.5">
-                    <p className="font-medium leading-normal">{task.text}</p>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className={`px-1 rounded text-[9px] font-mono font-bold ${
-                        task.priority === 'Alta' 
-                          ? 'bg-rose-50 text-rose-700 border border-rose-100' 
-                          : task.priority === 'Media'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-100'
-                          : 'bg-slate-50 text-slate-500 border border-slate-200/50'
-                      }`}>
-                        Prioridad {task.priority}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-            <span className="font-mono">Generado auto: 14:00 UTC</span>
-            <button 
-              onClick={() => {
-                const text = prompt("Ingresa el texto de la nueva tarea operativa:");
-                if (text) {
-                  setTasks([...tasks, { id: Date.now(), text, done: false, priority: 'Media' }]);
-                }
-              }}
-              className="text-indigo-600 font-bold hover:underline"
-            >
-              + Agregar Tarea
             </button>
           </div>
         </div>

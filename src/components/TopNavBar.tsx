@@ -4,13 +4,14 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Search, 
-  Globe2, 
-  Clock, 
-  Server, 
-  ShieldCheck, 
-  Plus, 
+import {
+  Search,
+  Globe2,
+  Clock,
+  Server,
+  ShieldCheck,
+  ShieldAlert,
+  Plus,
   Sparkles,
   Command
 } from 'lucide-react';
@@ -21,17 +22,21 @@ interface TopNavBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onQuickAdd: () => void;
-  activeProbesCount?: number;
-  systemStatus?: 'normal' | 'incident' | 'maintenance';
+  totalWebsites?: number;
+  upWebsites?: number;
+  criticalIncidents?: number;
+  warningIncidents?: number;
 }
 
-export default function TopNavBar({ 
-  user, 
-  searchQuery, 
-  onSearchChange, 
+export default function TopNavBar({
+  user,
+  searchQuery,
+  onSearchChange,
   onQuickAdd,
-  activeProbesCount = 6,
-  systemStatus = 'normal'
+  totalWebsites = 0,
+  upWebsites = 0,
+  criticalIncidents = 0,
+  warningIncidents = 0,
 }: TopNavBarProps) {
   const [localTime, setLocalTime] = useState<string>('');
   const [utcTime, setUtcTime] = useState<string>('');
@@ -79,13 +84,29 @@ export default function TopNavBar({
         <div className="hidden lg:flex items-center gap-4 text-xs font-medium text-slate-600 border-r border-slate-200 pr-5">
           <div className="flex items-center gap-1.5">
             <Globe2 className="w-3.5 h-3.5 text-indigo-500 animate-spin-slow" />
-            <span className="font-mono text-slate-500 font-bold">{activeProbesCount}/6 Probes</span>
+            <span className="font-mono text-slate-500 font-bold">{upWebsites}/{totalWebsites} Probes</span>
           </div>
-          
-          <div className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span className="text-emerald-600">Sistemas Operativos</span>
-          </div>
+
+          {criticalIncidents > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+              <span className="text-rose-600 font-semibold">
+                {criticalIncidents} Incidente{criticalIncidents > 1 ? 's' : ''} Crítico{criticalIncidents > 1 ? 's' : ''}
+              </span>
+            </div>
+          ) : warningIncidents > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-amber-600 font-semibold">
+                {warningIncidents} Advertencia{warningIncidents > 1 ? 's' : ''} Activa{warningIncidents > 1 ? 's' : ''}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-emerald-600">Sistemas Operativos</span>
+            </div>
+          )}
         </div>
 
         {/* Timestamps (Local & UTC) */}
