@@ -19,6 +19,7 @@ import { usePersistentState } from './hooks/usePersistentState';
 import Sidebar from './components/Sidebar';
 import TopNavBar from './components/TopNavBar';
 import LoginView from './components/LoginView';
+import ResetPasswordView from './components/ResetPasswordView';
 import DashboardView from './components/DashboardView';
 import InventoryView from './components/InventoryView';
 import DetailsView from './components/DetailsView';
@@ -40,7 +41,8 @@ export default function App() {
   const [currentView, setCurrentView] = usePersistentState<ViewType>('current_view', 'dashboard');
   const [selectedWebsiteId, setSelectedWebsiteId] = useState<string | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('resetToken'));
+  const [resetTokenConsumed, setResetTokenConsumed] = useState(false);
 
   // On mount, check for an existing session and load domain data if present
   useEffect(() => {
@@ -71,24 +73,6 @@ export default function App() {
     return () => clearInterval(pollId);
   }, [user]);
 
-  // Global keyboard shortcuts for navigation and search focusing
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // '/' to focus search
-      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        document.getElementById('global-search')?.focus();
-      }
-      // 'Escape' to clear search or go back
-      if (e.key === 'Escape') {
-        setSearchQuery('');
-        document.getElementById('global-search')?.blur();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
   // --- Core State Mutators / Action Handlers ---
 
   const handleLoginSuccess = (session: UserSession) => {
@@ -102,6 +86,11 @@ export default function App() {
     setWebsites([]);
     setIncidents([]);
     setCurrentView('login');
+  };
+
+  const handleUpdateAvatar = async (avatarUrl: string) => {
+    const { user: updated } = await api.auth.updateAvatar(avatarUrl);
+    setUser(updated);
   };
 
   const handleNavigateToView = (view: ViewType, extraData?: any) => {
@@ -158,14 +147,18 @@ export default function App() {
   };
 
   const handleAddUser = async (data: { email: string; username: string; role: UserRole }) => {
-    const { user: newUser, temporaryPassword } = await api.admin.createUser(data);
+    const { user: newUser, temporaryPassword, emailSent } = await api.admin.createUser(data);
     setAdminUsers([...adminUsers, newUser]);
-    return { temporaryPassword };
+    return { temporaryPassword, emailSent };
   };
 
   const handleUpdateUser = async (id: string, data: Partial<{ username: string; role: UserRole }>) => {
     const { user: updated } = await api.admin.updateUser(id, data);
     setAdminUsers(adminUsers.map((u) => (u.id === id ? updated : u)));
+    // Editing yourself changes what the sidebar/session should show — keep it in sync.
+    if (user && id === user.id) {
+      setUser({ ...user, username: updated.username, role: updated.role });
+    }
   };
 
   const handleRemoveUser = async (id: string) => {
@@ -209,7 +202,6 @@ export default function App() {
             onDeleteWebsite={handleDeleteWebsite}
             onToggleStatus={handleToggleStatus}
             onNavigateToDetails={(id) => handleNavigateToView('details', id)}
-            searchQuery={searchQuery}
           />
         );
       case 'details':
@@ -275,6 +267,20 @@ export default function App() {
     }
   };
 
+  // A password-reset link takes priority over everything else — works whether or not
+  // there's an existing session, and doesn't need the auth check to resolve first.
+  if (resetToken && !resetTokenConsumed) {
+    return (
+      <ResetPasswordView
+        token={resetToken}
+        onDone={() => {
+          setResetTokenConsumed(true);
+          window.history.replaceState({}, '', window.location.pathname);
+        }}
+      />
+    );
+  }
+
   // Render Login state first if user session is absent
   if (!authChecked) {
     return null;
@@ -291,11 +297,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans antialiased text-slate-800 flex">
       {/* Navigation Rails */}
-      <Sidebar 
+      <Sidebar
         currentView={currentView}
         onNavigate={(view) => handleNavigateToView(view)}
         user={user}
         onLogout={handleLogout}
+        onUpdateAvatar={handleUpdateAvatar}
         incidents={incidents}
       />
 
@@ -303,8 +310,6 @@ export default function App() {
       <div className="flex-1 pl-64 min-w-0">
         <TopNavBar
           user={user}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
           onQuickAdd={handleQuickAddTrigger}
           totalWebsites={websites.length}
           upWebsites={websites.filter((w) => w.status === 'up').length}

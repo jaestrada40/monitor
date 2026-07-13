@@ -5,22 +5,16 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Search,
   Globe2,
   Clock,
-  Server,
   ShieldCheck,
   ShieldAlert,
-  Plus,
-  Sparkles,
-  Command
+  Plus
 } from 'lucide-react';
 import { UserSession } from '../types';
 
 interface TopNavBarProps {
   user: UserSession | null;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
   onQuickAdd: () => void;
   totalWebsites?: number;
   upWebsites?: number;
@@ -30,8 +24,6 @@ interface TopNavBarProps {
 
 export default function TopNavBar({
   user,
-  searchQuery,
-  onSearchChange,
   onQuickAdd,
   totalWebsites = 0,
   upWebsites = 0,
@@ -55,31 +47,12 @@ export default function TopNavBar({
   if (!user) return null;
 
   return (
-    <header 
+    <header
       id="main-topbar"
-      className="h-16 border-b border-slate-200 bg-white fixed top-0 right-0 left-64 flex items-center justify-between px-6 z-20 shadow-xs"
+      className="h-16 border-b border-slate-200 bg-white fixed top-0 right-0 left-64 flex items-center px-6 z-20 shadow-xs"
     >
-      {/* Search & Global Probe Summary */}
-      <div className="flex items-center gap-6 flex-1 max-w-xl">
-        <div className="relative w-full group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
-          <input
-            id="global-search"
-            type="text"
-            placeholder="Buscar por sitio, URL, etiqueta, estado... (Presiona '/' para buscar)"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-9 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium placeholder-slate-400 focus:outline-hidden focus:border-indigo-500 focus:bg-white transition-all"
-          />
-          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-200/60 rounded text-[9px] font-mono text-slate-500 border border-slate-300/30 select-none pointer-events-none">
-            <Command className="w-2.5 h-2.5" />
-            <span>K</span>
-          </div>
-        </div>
-      </div>
-
       {/* DevOps Clocks & Probe Live status */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-6 ml-auto">
         {/* System Health Summary */}
         <div className="hidden lg:flex items-center gap-4 text-xs font-medium text-slate-600 border-r border-slate-200 pr-5">
           <div className="flex items-center gap-1.5">

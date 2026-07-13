@@ -18,6 +18,7 @@ export interface AdminUser {
   id: string;
   email: string;
   username: string;
+  avatarUrl: string;
   role: UserRole;
 }
 
@@ -42,6 +43,12 @@ export const api = {
       request<{ user: UserSession }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
     logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),
     me: () => request<{ user: UserSession }>('/auth/me'),
+    updateAvatar: (avatarUrl: string) =>
+      request<{ user: UserSession }>('/auth/me/avatar', { method: 'PUT', body: JSON.stringify({ avatarUrl }) }),
+    forgotPassword: (email: string) =>
+      request<{ ok: true }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+    resetPassword: (token: string, newPassword: string) =>
+      request<{ ok: true }>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
   },
   websites: {
     list: () => request<{ websites: Website[] }>('/websites'),
@@ -79,7 +86,7 @@ export const api = {
   admin: {
     listUsers: () => request<{ users: AdminUser[] }>('/admin/users'),
     createUser: (data: { email: string; username: string; role: UserRole }) =>
-      request<{ user: AdminUser; temporaryPassword: string }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
+      request<{ user: AdminUser; temporaryPassword: string; emailSent: boolean }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
     updateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) =>
       request<{ user: AdminUser }>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     removeUser: (id: string) => request<{ ok: true }>(`/admin/users/${id}`, { method: 'DELETE' }),

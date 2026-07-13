@@ -76,7 +76,7 @@ describe('seedAdminIfNeeded', () => {
     expect(valid).toBe(true);
 
     expect(calls[2][0]).toMatch(/INSERT INTO notification_settings/);
-    expect(calls[2][1]).toEqual(['user-1', ADMIN_EMAIL]);
+    expect(calls[2][1]).toEqual(['user-1', ADMIN_EMAIL, JSON.stringify([ADMIN_EMAIL])]);
 
     expect(calls[3][0]).toMatch(/INSERT INTO workspace_settings/);
     expect(calls[3][1]).toEqual(['user-1']);

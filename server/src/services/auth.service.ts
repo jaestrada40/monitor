@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -29,4 +30,16 @@ export function verifyToken(token: string): { userId: string } | null {
   } catch {
     return null;
   }
+}
+
+// The raw token goes in the email link; only its hash is stored, so a DB read alone
+// can't be used to reset someone's password.
+export function generatePasswordResetToken(): { rawToken: string; tokenHash: string } {
+  const rawToken = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  return { rawToken, tokenHash };
+}
+
+export function hashResetToken(rawToken: string): string {
+  return crypto.createHash('sha256').update(rawToken).digest('hex');
 }

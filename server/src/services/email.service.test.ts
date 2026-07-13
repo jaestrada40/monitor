@@ -8,7 +8,7 @@ vi.mock('nodemailer', () => ({
   },
 }));
 
-import { sendIncidentEmail, sendReportEmail, sendTestEmail } from './email.service.js';
+import { sendIncidentEmail, sendReportEmail, sendTestEmail, sendWelcomeEmail } from './email.service.js';
 
 describe('email.service', () => {
   beforeEach(() => {
@@ -64,5 +64,21 @@ describe('email.service', () => {
     const call = sendMailMock.mock.calls[0][0];
     expect(call.to).toBe('user@example.com');
     expect(call.subject).toContain('prueba');
+  });
+
+  it('sends a welcome email with the temporary password and returns true', async () => {
+    const sent = await sendWelcomeEmail('user@example.com', 'Nuevo Usuario', 'tempPass123!');
+    expect(sent).toBe(true);
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    const call = sendMailMock.mock.calls[0][0];
+    expect(call.to).toBe('user@example.com');
+    expect(call.text).toContain('tempPass123!');
+  });
+
+  it('does not send and returns false when SMTP_HOST is unset', async () => {
+    delete process.env.SMTP_HOST;
+    const sent = await sendWelcomeEmail('user@example.com', 'Nuevo Usuario', 'tempPass123!');
+    expect(sent).toBe(false);
+    expect(sendMailMock).not.toHaveBeenCalled();
   });
 });

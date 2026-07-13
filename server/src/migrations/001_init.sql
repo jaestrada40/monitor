@@ -22,6 +22,9 @@ ALTER TABLE users ALTER COLUMN role SET DEFAULT 'super-admin';
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super-admin', 'editor'));
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS websites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -99,3 +102,13 @@ SELECT u.id, COALESCE(n.email_address, '')
 FROM users u
 LEFT JOIN notification_settings n ON n.user_id = u.id
 WHERE NOT EXISTS (SELECT 1 FROM scheduled_reports sr WHERE sr.user_id = u.id);
+
+-- Support multiple alert recipients instead of a single email address.
+ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS email_addresses JSONB NOT NULL DEFAULT '[]';
+UPDATE notification_settings
+SET email_addresses = to_jsonb(ARRAY[email_address])
+WHERE email_addresses = '[]'::jsonb AND email_address IS NOT NULL AND email_address != '';
+
+-- Tracks the last SSL status we alerted on per site, so we only email once per
+-- valid->expiring->expired transition instead of on every check.
+ALTER TABLE websites ADD COLUMN IF NOT EXISTS ssl_alerted_status TEXT NOT NULL DEFAULT '';

@@ -17,12 +17,14 @@ import {
 import jsPDF from 'jspdf';
 import { ReportSummary, ScheduledReport } from '../types';
 import { api } from '../api';
+import Pagination from './Pagination';
 
 interface ReportsViewProps {
   companyName: string;
 }
 
 const DATE_RANGE_DAYS: Record<'7d' | '30d' | '90d', number> = { '7d': 7, '30d': 30, '90d': 90 };
+const PAGE_SIZE = 10;
 
 function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -96,11 +98,13 @@ export default function ReportsView({ companyName }: ReportsViewProps) {
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d');
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null);
+  const [sitesPage, setSitesPage] = useState(1);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [schedule, setSchedule] = useState<ScheduledReport | null>(null);
 
   useEffect(() => {
     api.reports.summary(DATE_RANGE_DAYS[dateRange]).then(setSummary);
+    setSitesPage(1);
   }, [dateRange]);
 
   useEffect(() => {
@@ -215,7 +219,7 @@ export default function ReportsView({ companyName }: ReportsViewProps) {
 
           {/* Interactive Bar Chart */}
           <div className="space-y-4">
-            {summary.perSiteUptime.map((site) => {
+            {summary.perSiteUptime.slice((sitesPage - 1) * PAGE_SIZE, sitesPage * PAGE_SIZE).map((site) => {
               const complies = site.uptime >= 99.9;
 
               return (
@@ -250,6 +254,8 @@ export default function ReportsView({ companyName }: ReportsViewProps) {
               <p className="text-xs text-slate-400 text-center py-6">Sin sitios monitoreados todavía.</p>
             )}
           </div>
+
+          <Pagination page={sitesPage} totalItems={summary.perSiteUptime.length} pageSize={PAGE_SIZE} onPageChange={setSitesPage} />
 
           <p className="text-[10px] text-slate-400 mt-5 leading-normal font-mono font-bold text-right uppercase">
             Métricas compiladas el {new Date().toLocaleDateString()}

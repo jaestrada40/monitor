@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { chromium, type Browser } from 'playwright';
-import { sendIncidentEmail } from './email.service.js';
+import { sendIncidentEmail, sendSslExpiryEmail } from './email.service.js';
 import { checkSsl } from './ssl.service.js';
 
 interface WebsiteCheckTarget {
@@ -64,6 +64,25 @@ async function browserCheck(url: string): Promise<{ ok: boolean; ms: number }> {
   }
 }
 
+interface AlertRecipients {
+  emailEnabled: boolean;
+  emails: string[];
+  websiteName: string;
+}
+
+async function getAlertRecipients(pool: Pool, websiteId: string): Promise<AlertRecipients | undefined> {
+  const result = await pool.query(
+    `SELECT n.email_enabled, n.email_addresses, w.name AS website_name
+     FROM notification_settings n JOIN websites w ON w.user_id = n.user_id
+     WHERE w.id = $1`,
+    [websiteId]
+  );
+  const row = result.rows[0];
+  if (!row) return undefined;
+  const emails: string[] = Array.isArray(row.email_addresses) ? row.email_addresses.filter(Boolean) : [];
+  return { emailEnabled: row.email_enabled, emails, websiteName: row.website_name };
+}
+
 export async function createIncidentIfNeeded(
   pool: Pool,
   websiteId: string,
@@ -76,27 +95,23 @@ export async function createIncidentIfNeeded(
   );
   if (existing.rows.length > 0) return;
 
-  const websiteResult = await pool.query('SELECT name FROM websites WHERE id = $1', [websiteId]);
   const title = severity === 'critical' ? 'Sitio no responde' : 'Latencia elevada detectada';
   await pool.query(
     `INSERT INTO incidents (website_id, title, severity, status, description)
      VALUES ($1, $2, $3, 'active', $4)`,
     [websiteId, title, severity, description]
   );
-  void websiteResult;
 
-  const notifyResult = await pool.query(
-    `SELECT n.email_enabled, n.email_address, w.name AS website_name
-     FROM notification_settings n JOIN websites w ON w.user_id = n.user_id
-     WHERE w.id = $1`,
-    [websiteId]
-  );
-  const notify = notifyResult.rows[0];
-  if (notify?.email_enabled && notify.email_address) {
+  // Only "site is down" is worth an email — latency warnings stay visible in the UI but
+  // don't page anyone, to avoid alert fatigue over non-critical slowness.
+  if (severity !== 'critical') return;
+
+  const notify = await getAlertRecipients(pool, websiteId);
+  if (notify?.emailEnabled && notify.emails.length > 0) {
     try {
       await sendIncidentEmail({
-        to: notify.email_address,
-        websiteName: notify.website_name,
+        to: notify.emails,
+        websiteName: notify.websiteName,
         kind: 'created',
         severity,
         description,
@@ -109,7 +124,7 @@ export async function createIncidentIfNeeded(
 
 export async function resolveActiveIncidentIfAny(pool: Pool, websiteId: string) {
   const active = await pool.query(
-    "SELECT id FROM incidents WHERE website_id = $1 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1",
+    "SELECT id, severity FROM incidents WHERE website_id = $1 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1",
     [websiteId]
   );
   if (active.rows.length === 0) return;
@@ -117,18 +132,53 @@ export async function resolveActiveIncidentIfAny(pool: Pool, websiteId: string) 
   await pool.query("UPDATE incidents SET status = 'resolved', resolved_at = now() WHERE id = $1", [active.rows[0].id]);
   await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [websiteId]);
 
-  const notifyResult = await pool.query(
-    `SELECT n.email_enabled, n.email_address, w.name AS website_name
-     FROM notification_settings n JOIN websites w ON w.user_id = n.user_id
-     WHERE w.id = $1`,
-    [websiteId]
-  );
-  const notify = notifyResult.rows[0];
-  if (notify?.email_enabled && notify.email_address) {
+  // Mirror createIncidentIfNeeded: only email about recovery from a real outage, not from
+  // a latency warning that was never emailed in the first place.
+  if (active.rows[0].severity !== 'critical') return;
+
+  const notify = await getAlertRecipients(pool, websiteId);
+  if (notify?.emailEnabled && notify.emails.length > 0) {
     try {
-      await sendIncidentEmail({ to: notify.email_address, websiteName: notify.website_name, kind: 'resolved' });
+      await sendIncidentEmail({ to: notify.emails, websiteName: notify.websiteName, kind: 'resolved' });
     } catch (err) {
       console.error('Failed to send incident resolution email:', err);
+    }
+  }
+}
+
+async function checkSslAndAlert(pool: Pool, website: WebsiteCheckTarget) {
+  const previous = await pool.query('SELECT ssl_alerted_status FROM websites WHERE id = $1', [website.id]);
+  const previousAlerted: string = previous.rows[0]?.ssl_alerted_status ?? '';
+
+  const ssl = await checkSsl(website.url, website.thresholdSslDays);
+  await pool.query('UPDATE websites SET ssl_status = $1, ssl_expiry_days = $2, ssl_issuer = $3 WHERE id = $4', [
+    ssl.status,
+    ssl.expiryDays,
+    ssl.issuer,
+    website.id,
+  ]);
+
+  if (ssl.status !== 'expiring' && ssl.status !== 'expired') {
+    // Cert is valid again (renewed) — clear so a future re-expiry alerts again.
+    if (previousAlerted !== '') {
+      await pool.query("UPDATE websites SET ssl_alerted_status = '' WHERE id = $1", [website.id]);
+    }
+    return;
+  }
+  const alertStatus: 'expiring' | 'expired' = ssl.status;
+
+  // Only email once per transition (e.g. the check where it first becomes "expiring"),
+  // not on every check while it remains in that state.
+  if (alertStatus === previousAlerted) return;
+
+  await pool.query('UPDATE websites SET ssl_alerted_status = $1 WHERE id = $2', [alertStatus, website.id]);
+
+  const notify = await getAlertRecipients(pool, website.id);
+  if (notify?.emailEnabled && notify.emails.length > 0) {
+    try {
+      await sendSslExpiryEmail(notify.emails, notify.websiteName, alertStatus, ssl.expiryDays);
+    } catch (err) {
+      console.error('Failed to send SSL expiry email:', err);
     }
   }
 }
@@ -154,11 +204,7 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, $2)', [website.id, valueMs]);
   await pool.query('UPDATE websites SET last_checked = now() WHERE id = $1', [website.id]);
 
-  const ssl = await checkSsl(website.url, website.thresholdSslDays);
-  await pool.query(
-    'UPDATE websites SET ssl_status = $1, ssl_expiry_days = $2, ssl_issuer = $3 WHERE id = $4',
-    [ssl.status, ssl.expiryDays, ssl.issuer, website.id]
-  );
+  await checkSslAndAlert(pool, website);
 
   if (!result.ok) {
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);

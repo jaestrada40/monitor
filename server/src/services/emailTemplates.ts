@@ -93,6 +93,90 @@ export function incidentResolvedEmail(websiteName: string): { subject: string; h
   return { subject, html, text };
 }
 
+export function sslExpiryEmail(
+  websiteName: string,
+  status: 'expiring' | 'expired',
+  daysLeft: number
+): { subject: string; html: string; text: string } {
+  const tone = status === 'expired' ? 'critical' : 'warning';
+  const c = COLORS[tone];
+  const subject = status === 'expired'
+    ? `[MonitorPro] Certificado SSL expirado en ${websiteName}`
+    : `[MonitorPro] Certificado SSL por vencer en ${websiteName}`;
+
+  const message = status === 'expired'
+    ? `El certificado SSL de ${websiteName} ya expiró hace ${Math.abs(daysLeft)} día${Math.abs(daysLeft) === 1 ? '' : 's'}. Los visitantes verán una advertencia de seguridad en su navegador.`
+    : `El certificado SSL de ${websiteName} vence en ${daysLeft} día${daysLeft === 1 ? '' : 's'}. Renuévalo antes de que expire para evitar interrupciones.`;
+
+  const html = shell(
+    message,
+    `
+    <div style="margin-bottom:16px;">${badge(status === 'expired' ? 'SSL Expirado' : 'SSL por Vencer', tone)}</div>
+    <h1 style="margin:0 0 8px;font-size:20px;color:#0f172a;">${escapeHtml(websiteName)}</h1>
+    <div style="padding:14px 16px;background-color:${c.bg};border:1px solid ${c.border};border-radius:8px;">
+      <p style="margin:0;font-size:13px;color:${c.text};line-height:1.5;">${escapeHtml(message)}</p>
+    </div>
+    `
+  );
+  const text = message;
+  return { subject, html, text };
+}
+
+export function passwordResetEmail(username: string, resetUrl: string): { subject: string; html: string; text: string } {
+  const subject = '[MonitorPro] Restablecer tu contraseña';
+  const html = shell(
+    'Solicitud para restablecer tu contraseña',
+    `
+    <h1 style="margin:0 0 8px;font-size:20px;color:#0f172a;">Restablecer contraseña</h1>
+    <p style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.5;">
+      Hola ${escapeHtml(username)}, recibimos una solicitud para restablecer tu contraseña de MonitorPro.
+      Este enlace es válido por 1 hora. Si no fuiste tú, puedes ignorar este correo.
+    </p>
+    <a href="${resetUrl}" style="display:inline-block;padding:10px 20px;background-color:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:700;">Restablecer contraseña</a>
+    <p style="margin:20px 0 0;font-size:11px;color:#94a3b8;word-break:break-all;">${escapeHtml(resetUrl)}</p>
+    `
+  );
+  const text = `Recibimos una solicitud para restablecer tu contraseña de MonitorPro. Este enlace es válido por 1 hora:\n\n${resetUrl}\n\nSi no fuiste tú, puedes ignorar este correo.`;
+  return { subject, html, text };
+}
+
+export function welcomeEmail(
+  username: string,
+  email: string,
+  temporaryPassword: string,
+  loginUrl: string
+): { subject: string; html: string; text: string } {
+  const subject = '[MonitorPro] Te invitaron a un workspace';
+  const html = shell(
+    `Tu cuenta de MonitorPro está lista`,
+    `
+    <div style="margin-bottom:16px;">${badge('Invitación', 'success')}</div>
+    <h1 style="margin:0 0 8px;font-size:20px;color:#0f172a;">¡Bienvenido, ${escapeHtml(username)}!</h1>
+    <p style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.5;">
+      Se creó una cuenta para ti en MonitorPro. Usa estas credenciales para iniciar sesión y te recomendamos
+      cambiar la contraseña luego de tu primer acceso.
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+      <tr>
+        <td style="padding:14px 16px;background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:8px 8px 0 0;border-bottom:none;">
+          <span style="display:block;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Correo</span>
+          <span style="display:block;font-size:14px;font-weight:600;color:#0f172a;margin-top:2px;">${escapeHtml(email)}</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:14px 16px;background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:0 0 8px 8px;">
+          <span style="display:block;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Contraseña temporal</span>
+          <span style="display:block;font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;font-family:monospace;">${escapeHtml(temporaryPassword)}</span>
+        </td>
+      </tr>
+    </table>
+    <a href="${loginUrl}" style="display:inline-block;padding:10px 20px;background-color:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:700;">Iniciar sesión</a>
+    `
+  );
+  const text = `Se creó una cuenta para ti en MonitorPro.\n\nCorreo: ${email}\nContraseña temporal: ${temporaryPassword}\n\nInicia sesión en: ${loginUrl}`;
+  return { subject, html, text };
+}
+
 export function testEmail(): { subject: string; html: string; text: string } {
   const subject = '[MonitorPro] Correo de prueba';
   const html = shell(

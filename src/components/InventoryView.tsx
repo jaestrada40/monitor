@@ -27,6 +27,11 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { Website } from '../types';
+import { useToast } from '../toast';
+import { useConfirm } from '../confirm';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 10;
 
 interface InventoryViewProps {
   websites: Website[];
@@ -35,7 +40,6 @@ interface InventoryViewProps {
   onDeleteWebsite: (id: string) => void;
   onToggleStatus: (id: string) => void; // toggle between Up/Maintenance
   onNavigateToDetails: (id: string) => void;
-  searchQuery: string;
 }
 
 export default function InventoryView({
@@ -45,13 +49,16 @@ export default function InventoryView({
   onDeleteWebsite,
   onToggleStatus,
   onNavigateToDetails,
-  searchQuery
 }: InventoryViewProps) {
-  
+  const { showToast } = useToast();
+  const confirm = useConfirm();
+
   // Local state
+  const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'up' | 'down' | 'degraded' | 'maintenance'>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [page, setPage] = useState(1);
   
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,10 +90,17 @@ export default function InventoryView({
     return matchesSearch && matchesStatus && matchesTag;
   });
 
+  // Reset to page 1 whenever the filtered set changes shape so we never land on an empty page.
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, selectedTag]);
+
+  const pagedWebsites = filteredWebsites.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const handleSubmitAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSiteName || !newSiteUrl) {
-      alert("Por favor, rellena el nombre y la dirección URL.");
+      showToast('Por favor, rellena el nombre y la dirección URL.', 'error');
       return;
     }
     
@@ -139,7 +153,19 @@ export default function InventoryView({
       {/* Filter and View Mode Row */}
       <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
-          
+
+          {/* Search input (local to this view) */}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por nombre, URL o etiqueta..."
+              className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium placeholder-slate-400 focus:outline-hidden focus:border-indigo-500 focus:bg-white transition-all w-56"
+            />
+          </div>
+
           {/* Status Filter buttons */}
           <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 text-xs">
             {(['all', 'up', 'down', 'degraded', 'maintenance'] as const).map((status) => (
@@ -203,7 +229,7 @@ export default function InventoryView({
       {/* Grid View */}
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredWebsites.map((web) => (
+          {pagedWebsites.map((web) => (
             <div 
               key={web.id}
               className="bg-white border border-slate-200 rounded-xl shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between overflow-hidden group"
@@ -342,7 +368,12 @@ export default function InventoryView({
                     <Edit3 className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => { if (confirm(`¿Estás seguro de que deseas eliminar "${web.name}"?`)) onDeleteWebsite(web.id); }}
+                    onClick={async () => {
+                      if (await confirm(`¿Estás seguro de que deseas eliminar "${web.name}"? Esta acción no se puede deshacer.`, { danger: true, confirmLabel: 'Eliminar' })) {
+                        onDeleteWebsite(web.id);
+                        showToast(`"${web.name}" eliminado.`, 'success');
+                      }
+                    }}
                     className="p-1.5 bg-white border border-slate-200 text-slate-400 rounded-md hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors cursor-pointer"
                     title="Eliminar Sitio"
                   >
@@ -375,7 +406,11 @@ export default function InventoryView({
             </div>
           )}
         </div>
-      ) : (
+      ) : null}
+      {viewMode === 'grid' && filteredWebsites.length > 0 && (
+        <Pagination page={page} totalItems={filteredWebsites.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+      )}
+      {viewMode === 'list' && (
         /* List View */
         <div className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
           <div className="overflow-x-auto">
@@ -392,7 +427,7 @@ export default function InventoryView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredWebsites.map((web) => (
+                {pagedWebsites.map((web) => (
                   <tr key={web.id} className="hover:bg-slate-50/60 transition-colors group">
                     <td className="p-4">
                       <div className="font-bold text-slate-900 hover:text-indigo-600 transition-colors cursor-pointer" onClick={() => onNavigateToDetails(web.id)}>
@@ -441,7 +476,12 @@ export default function InventoryView({
                           Ver
                         </button>
                         <button
-                          onClick={() => { if (confirm(`¿Eliminar ${web.name}?`)) onDeleteWebsite(web.id); }}
+                          onClick={async () => {
+                            if (await confirm(`¿Estás seguro de que deseas eliminar "${web.name}"? Esta acción no se puede deshacer.`, { danger: true, confirmLabel: 'Eliminar' })) {
+                              onDeleteWebsite(web.id);
+                              showToast(`"${web.name}" eliminado.`, 'success');
+                            }
+                          }}
                           className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -452,6 +492,9 @@ export default function InventoryView({
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 pb-4">
+            <Pagination page={page} totalItems={filteredWebsites.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         </div>
       )}

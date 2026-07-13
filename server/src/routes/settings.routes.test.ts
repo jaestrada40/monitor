@@ -17,7 +17,10 @@ async function createTestUser(email: string, username: string) {
     [email, passwordHash, username]
   );
   const userId = result.rows[0].id;
-  await pool.query('INSERT INTO notification_settings (user_id, email_address) VALUES ($1, $2)', [userId, email]);
+  await pool.query(
+    'INSERT INTO notification_settings (user_id, email_address, email_addresses) VALUES ($1, $2, $3)',
+    [userId, email, JSON.stringify([email])]
+  );
   await pool.query('INSERT INTO workspace_settings (user_id) VALUES ($1)', [userId]);
 }
 
@@ -51,14 +54,35 @@ describe('settings routes', () => {
   it('reads and updates notification settings', async () => {
     const getRes = await request(app).get('/api/notifications').set('Cookie', cookie);
     expect(getRes.status).toBe(200);
-    expect(getRes.body.notifications.emailAddress).toBe('settings-test@example.com');
+    expect(getRes.body.notifications.emailAddresses).toEqual(['settings-test@example.com']);
 
     const putRes = await request(app)
       .put('/api/notifications')
       .set('Cookie', cookie)
-      .send({ ...getRes.body.notifications, thresholdResponseTime: 750 });
+      .send({ ...getRes.body.notifications, thresholdResponseTime: 750, emailAddresses: ['a@example.com', 'b@example.com'] });
     expect(putRes.status).toBe(200);
     expect(putRes.body.notifications.thresholdResponseTime).toBe(750);
+    expect(putRes.body.notifications.emailAddresses).toEqual(['a@example.com', 'b@example.com']);
+  });
+
+  it('drops invalid entries when saving multiple email addresses', async () => {
+    const res = await request(app)
+      .put('/api/notifications')
+      .set('Cookie', cookie)
+      .send({
+        email: true,
+        emailAddresses: ['valid@example.com', 'not-an-email', ''],
+        slack: false,
+        slackWebhook: '',
+        sms: false,
+        smsPhone: '',
+        telegram: false,
+        telegramChatId: '',
+        thresholdResponseTime: 500,
+        thresholdSslDays: 7,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.notifications.emailAddresses).toEqual(['valid@example.com']);
   });
 
   it('rejects an invalid email for the test-email endpoint', async () => {

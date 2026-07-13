@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Activity, ShieldAlert, Key, Mail, Lock, Eye, EyeOff, ShieldCheck, X } from 'lucide-react';
 import { UserSession } from '../types';
 import { api } from '../api';
 
@@ -18,6 +18,11 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,6 +41,26 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail) return;
+    setForgotSubmitting(true);
+    try {
+      await api.auth.forgotPassword(forgotEmail);
+    } finally {
+      setForgotSubmitting(false);
+      // Always show the same confirmation, whether or not the email is registered —
+      // avoids leaking which addresses have accounts.
+      setForgotSent(true);
+    }
+  };
+
+  const closeForgotPassword = () => {
+    setShowForgotPassword(false);
+    setForgotEmail('');
+    setForgotSent(false);
   };
 
   return (
@@ -89,7 +114,13 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
             <div>
               <div className="flex justify-between items-center mb-2">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Contraseña</label>
-                <a href="#forgot" onClick={(e) => { e.preventDefault(); alert("Enlace de recuperación enviado al correo proporcionado."); }} className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors">¿Olvidaste la contraseña?</a>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(true)}
+                  className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
+                >
+                  ¿Olvidaste la contraseña?
+                </button>
               </div>
               <div className="relative group">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
@@ -216,6 +247,57 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
           </div>
         </div>
       </div>
+
+      {showForgotPassword && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full shadow-2xl overflow-hidden font-sans">
+            <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="font-display font-bold text-sm text-white tracking-wide">Recuperar contraseña</h3>
+              <button onClick={closeForgotPassword} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {forgotSent ? (
+              <div className="p-6 space-y-4 text-center">
+                <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
+                <p className="text-sm text-slate-300">
+                  Si <strong className="text-white">{forgotEmail}</strong> tiene una cuenta, te enviamos un correo con instrucciones para restablecer tu contraseña.
+                </p>
+                <button
+                  onClick={closeForgotPassword}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Cerrar
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPasswordSubmit} className="p-6 space-y-4">
+                <p className="text-xs text-slate-400">Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.</p>
+                <div className="relative group">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                  <input
+                    type="email"
+                    required
+                    autoFocus
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full bg-slate-950/60 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-sm font-medium text-white placeholder-slate-600 focus:outline-hidden focus:border-indigo-500 focus:bg-slate-950 transition-all"
+                    placeholder="ejemplo@empresa.com"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={forgotSubmitting}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800/50 text-white rounded-lg text-sm font-semibold transition-all cursor-pointer"
+                >
+                  {forgotSubmitting ? 'Enviando...' : 'Enviar enlace de recuperación'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

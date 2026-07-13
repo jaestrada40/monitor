@@ -19,6 +19,9 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { Incident, Website } from '../types';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 10;
 
 interface IncidentsViewProps {
   incidents: Incident[];
@@ -38,7 +41,8 @@ export default function IncidentsView({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'acknowledged' | 'resolved'>('all');
   const [severityFilter, setSeverityFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
-  
+  const [page, setPage] = useState(1);
+
   // Expanded item state
   const [expandedIncidentIds, setExpandedIncidentIds] = useState<string[]>([]);
   
@@ -62,6 +66,12 @@ export default function IncidentsView({
 
     return matchesSearch && matchesStatus && matchesSeverity;
   });
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, severityFilter]);
+
+  const pagedIncidents = filteredIncidents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-6 font-sans text-slate-800">
@@ -124,7 +134,7 @@ export default function IncidentsView({
 
       {/* Incidents List Grid */}
       <div className="space-y-3.5">
-        {filteredIncidents.map((inc) => {
+        {pagedIncidents.map((inc) => {
           const isExpanded = expandedIncidentIds.includes(inc.id);
           
           return (
@@ -256,6 +266,10 @@ export default function IncidentsView({
           </div>
         )}
       </div>
+
+      {filteredIncidents.length > 0 && (
+        <Pagination page={page} totalItems={filteredIncidents.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+      )}
 
     </div>
   );

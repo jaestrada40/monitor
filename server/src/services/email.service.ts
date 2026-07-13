@@ -1,9 +1,9 @@
 import nodemailer from 'nodemailer';
 import type { ReportSummary } from './report.service.js';
-import { incidentCreatedEmail, incidentResolvedEmail, testEmail, reportEmail } from './emailTemplates.js';
+import { incidentCreatedEmail, incidentResolvedEmail, testEmail, reportEmail, welcomeEmail, passwordResetEmail, sslExpiryEmail } from './emailTemplates.js';
 
 interface IncidentEmailParams {
-  to: string;
+  to: string | string[];
   websiteName: string;
   kind: 'created' | 'resolved';
   severity?: string;
@@ -43,6 +43,29 @@ export async function sendIncidentEmail(params: IncidentEmailParams): Promise<vo
   });
 }
 
+export async function sendSslExpiryEmail(
+  to: string | string[],
+  websiteName: string,
+  status: 'expiring' | 'expired',
+  daysLeft: number
+): Promise<void> {
+  if (!process.env.SMTP_HOST) {
+    console.warn('SMTP_HOST not configured — skipping SSL expiry email.');
+    return;
+  }
+
+  const transport = getTransport();
+  const { subject, html, text } = sslExpiryEmail(websiteName, status, daysLeft);
+
+  await transport.sendMail({
+    from: process.env.SMTP_FROM || 'alerts@monitorpro.io',
+    to,
+    subject,
+    text,
+    html,
+  });
+}
+
 export async function sendTestEmail(to: string): Promise<void> {
   const transport = getTransport();
   const { subject, html, text } = testEmail();
@@ -53,6 +76,49 @@ export async function sendTestEmail(to: string): Promise<void> {
     text,
     html,
   });
+}
+
+// Returns whether the email was actually sent, so callers can fall back to surfacing the
+// temporary password directly (e.g. SMTP not configured in this environment).
+export async function sendWelcomeEmail(to: string, username: string, temporaryPassword: string): Promise<boolean> {
+  if (!process.env.SMTP_HOST) {
+    console.warn('SMTP_HOST not configured — skipping welcome email.');
+    return false;
+  }
+
+  const transport = getTransport();
+  const loginUrl = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+  const { subject, html, text } = welcomeEmail(username, to, temporaryPassword, loginUrl);
+
+  await transport.sendMail({
+    from: process.env.SMTP_FROM || 'alerts@monitorpro.io',
+    to,
+    subject,
+    text,
+    html,
+  });
+  return true;
+}
+
+export async function sendPasswordResetEmail(to: string, username: string, rawToken: string): Promise<boolean> {
+  if (!process.env.SMTP_HOST) {
+    console.warn('SMTP_HOST not configured — skipping password reset email.');
+    return false;
+  }
+
+  const transport = getTransport();
+  const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+  const resetUrl = `${frontendOrigin}/?resetToken=${encodeURIComponent(rawToken)}`;
+  const { subject, html, text } = passwordResetEmail(username, resetUrl);
+
+  await transport.sendMail({
+    from: process.env.SMTP_FROM || 'alerts@monitorpro.io',
+    to,
+    subject,
+    text,
+    html,
+  });
+  return true;
 }
 
 export async function sendReportEmail(to: string, frequency: 'weekly' | 'monthly', summary: ReportSummary): Promise<void> {

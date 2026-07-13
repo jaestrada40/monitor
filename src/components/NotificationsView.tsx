@@ -11,27 +11,33 @@ import {
   ShieldCheck,
   Smartphone,
   Sliders,
-  Lock
+  Lock,
+  Plus,
+  X
 } from 'lucide-react';
 import { NotificationSettings } from '../types';
 import { api } from '../api';
+import { useToast } from '../toast';
 
 interface NotificationsViewProps {
   notifications: NotificationSettings;
   onSaveNotifications: (settings: NotificationSettings) => void;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function NotificationsView({ notifications, onSaveNotifications }: NotificationsViewProps) {
+  const { showToast } = useToast();
 
   // Local state initialized with current props
   const [email, setEmail] = useState(notifications.email);
-  const [emailAddress, setEmailAddress] = useState(notifications.emailAddress);
+  const [emailAddresses, setEmailAddresses] = useState<string[]>(notifications.emailAddresses);
+  const [newEmailInput, setNewEmailInput] = useState('');
 
   const [thresholdResponseTime, setThresholdResponseTime] = useState(notifications.thresholdResponseTime);
   const [thresholdSslDays, setThresholdSslDays] = useState(notifications.thresholdSslDays);
 
   const [testingEmail, setTestingEmail] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const handleSave = (e: React.FormEvent) => {
@@ -39,7 +45,7 @@ export default function NotificationsView({ notifications, onSaveNotifications }
     onSaveNotifications({
       ...notifications,
       email,
-      emailAddress,
+      emailAddresses,
       thresholdResponseTime,
       thresholdSslDays,
     });
@@ -48,22 +54,36 @@ export default function NotificationsView({ notifications, onSaveNotifications }
     setTimeout(() => setSaveSuccess(false), 2000);
   };
 
+  const addEmail = () => {
+    const value = newEmailInput.trim();
+    if (!value) return;
+    if (!EMAIL_RE.test(value)) {
+      showToast('Ese correo no parece válido.', 'error');
+      return;
+    }
+    if (emailAddresses.includes(value)) {
+      showToast('Ese correo ya está en la lista.', 'error');
+      return;
+    }
+    setEmailAddresses([...emailAddresses, value]);
+    setNewEmailInput('');
+  };
+
+  const removeEmail = (value: string) => {
+    setEmailAddresses(emailAddresses.filter((e) => e !== value));
+  };
+
   const testEmailChannel = async () => {
-    if (!emailAddress) return;
+    if (emailAddresses.length === 0) return;
     setTestingEmail(true);
-    setTestResult(null);
     try {
-      await api.notifications.testEmail(emailAddress);
-      setTestResult({ ok: true, message: `Correo de prueba enviado a ${emailAddress}. Revisa tu bandeja.` });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'send_failed';
-      setTestResult({
-        ok: false,
-        message:
-          message === 'smtp_not_configured'
-            ? 'El servidor SMTP no está configurado todavía.'
-            : 'No se pudo enviar el correo de prueba. Verifica la dirección o la configuración SMTP.',
-      });
+      const results = await Promise.allSettled(emailAddresses.map((addr) => api.notifications.testEmail(addr)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed === 0) {
+        showToast(`Correo de prueba enviado a ${emailAddresses.length} destinatario${emailAddresses.length > 1 ? 's' : ''}.`, 'success');
+      } else {
+        showToast(`${failed} de ${emailAddresses.length} correos de prueba fallaron. Verifica la configuración SMTP.`, 'error');
+      }
     } finally {
       setTestingEmail(false);
     }
@@ -101,7 +121,7 @@ export default function NotificationsView({ notifications, onSaveNotifications }
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm">Notificaciones por Correo</h3>
-                  <span className="text-[11px] text-slate-400 font-medium">Alertas reales enviadas por email cuando se crea o resuelve un incidente.</span>
+                  <span className="text-[11px] text-slate-400 font-medium">Se envía solo cuando un sitio está caído o su certificado SSL está por vencer o ya expiró.</span>
                 </div>
               </div>
 
@@ -118,32 +138,60 @@ export default function NotificationsView({ notifications, onSaveNotifications }
             </div>
 
             {email && (
-              <div className="space-y-2">
-                <div className="flex gap-3 text-xs font-semibold">
-                  <div className="flex-1">
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Destinatarios</label>
+                  {emailAddresses.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {emailAddresses.map((addr) => (
+                        <span
+                          key={addr}
+                          className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-indigo-50 border border-indigo-100 rounded-full text-[11px] font-semibold text-indigo-700"
+                        >
+                          {addr}
+                          <button
+                            type="button"
+                            onClick={() => removeEmail(addr)}
+                            className="p-0.5 rounded-full hover:bg-indigo-100 text-indigo-500 cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2 text-xs font-semibold">
                     <input
                       type="email"
-                      required
-                      placeholder="alertas@empresa.com"
-                      value={emailAddress}
-                      onChange={(e) => setEmailAddress(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                      placeholder="agregar@correo.com"
+                      value={newEmailInput}
+                      onChange={(e) => setNewEmailInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addEmail();
+                        }
+                      }}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
                     />
+                    <button
+                      type="button"
+                      onClick={addEmail}
+                      className="px-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1 text-[11px]"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Agregar
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={testEmailChannel}
-                    disabled={testingEmail || !emailAddress}
-                    className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 disabled:text-slate-400 border border-slate-200 text-slate-700 rounded-lg font-bold transition-all cursor-pointer text-[11px]"
-                  >
-                    {testingEmail ? 'Enviando...' : 'Probar'}
-                  </button>
                 </div>
-                {testResult && (
-                  <p className={`text-[11px] font-semibold ${testResult.ok ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {testResult.message}
-                  </p>
-                )}
+
+                <button
+                  type="button"
+                  onClick={testEmailChannel}
+                  disabled={testingEmail || emailAddresses.length === 0}
+                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 disabled:text-slate-400 border border-slate-200 text-slate-700 rounded-lg font-bold transition-all cursor-pointer text-[11px]"
+                >
+                  {testingEmail ? 'Enviando...' : `Probar (${emailAddresses.length})`}
+                </button>
               </div>
             )}
           </div>
@@ -236,7 +284,7 @@ export default function NotificationsView({ notifications, onSaveNotifications }
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold font-mono">ms</span>
                 </div>
                 <span className="text-[10px] text-slate-400 font-medium block mt-1.5">
-                  Se genera una advertencia en el primer chequeo que supere este umbral.
+                  El sitio se marca "degradado" en el primer chequeo que supere este umbral. No genera correo, solo se ve en la app.
                 </span>
               </div>
 
@@ -255,7 +303,7 @@ export default function NotificationsView({ notifications, onSaveNotifications }
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold font-mono">días</span>
                 </div>
                 <span className="text-[10px] text-slate-400 font-medium block mt-1.5">
-                  El certificado se marca "por expirar" cuando falten menos días de los establecidos.
+                  El certificado se marca "por expirar" cuando falten menos días de los establecidos — dispara un correo real.
                 </span>
               </div>
             </div>

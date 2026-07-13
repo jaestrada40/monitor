@@ -3,29 +3,52 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
-import { 
-  Activity, 
-  Globe, 
-  AlertTriangle, 
-  FileBarChart, 
-  BellRing, 
-  Settings, 
+import React, { useRef, useState } from 'react';
+import {
+  Activity,
+  Globe,
+  AlertTriangle,
+  FileBarChart,
+  BellRing,
+  Settings,
   LogOut,
-  ShieldAlert
+  Camera
 } from 'lucide-react';
 import { ViewType, UserSession, Incident } from '../types';
+import { resolveAvatarUrl, resizeImageToDataUrl } from '../avatar';
+import { useToast } from '../toast';
 
 interface SidebarProps {
   currentView: ViewType;
   onNavigate: (view: ViewType) => void;
   user: UserSession | null;
   onLogout: () => void;
+  onUpdateAvatar: (avatarUrl: string) => Promise<void>;
   incidents: Incident[];
 }
 
-export default function Sidebar({ currentView, onNavigate, user, onLogout, incidents }: SidebarProps) {
+export default function Sidebar({ currentView, onNavigate, user, onLogout, onUpdateAvatar, incidents }: SidebarProps) {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const { showToast } = useToast();
+
   if (!user) return null;
+
+  const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file);
+      await onUpdateAvatar(dataUrl);
+      showToast('Foto de perfil actualizada.', 'success');
+    } catch {
+      showToast('No se pudo actualizar la foto de perfil. Intenta con otra imagen.', 'error');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const activeIncidentsCount = incidents.filter(i => i.status !== 'resolved').length;
 
@@ -96,12 +119,30 @@ export default function Sidebar({ currentView, onNavigate, user, onLogout, incid
       <div className="p-4 border-t border-slate-800">
         <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 mb-3">
           <div className="flex items-center gap-3">
-            <img 
-              referrerPolicy="no-referrer"
-              src={user.avatarUrl} 
-              alt={user.username} 
-              className="w-10 h-10 rounded-full border border-slate-700 object-cover"
-            />
+            <button
+              type="button"
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={uploadingAvatar}
+              title="Cambiar foto de perfil"
+              className="relative w-10 h-10 rounded-full shrink-0 cursor-pointer group/avatar"
+            >
+              <img
+                referrerPolicy="no-referrer"
+                src={resolveAvatarUrl(user)}
+                alt={user.username}
+                className="w-10 h-10 rounded-full border border-slate-700 object-cover"
+              />
+              <span className="absolute inset-0 rounded-full bg-black/0 group-hover/avatar:bg-black/50 flex items-center justify-center transition-colors">
+                <Camera className="w-3.5 h-3.5 text-white opacity-0 group-hover/avatar:opacity-100 transition-opacity" />
+              </span>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarFile}
+                className="hidden"
+              />
+            </button>
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold text-slate-200 truncate">{user.username}</div>
               <div className="text-[10px] text-slate-400 truncate font-mono">{user.email}</div>

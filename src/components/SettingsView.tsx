@@ -4,45 +4,40 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Settings, 
-  Users, 
-  Key, 
-  ShieldCheck, 
-  UserPlus, 
-  Trash2, 
-  RefreshCw, 
-  Database, 
-  CreditCard, 
-  Globe2,
-  Check
+import {
+  Users,
+  ShieldCheck,
+  UserPlus,
+  Trash2,
+  Pencil,
+  X
 } from 'lucide-react';
 import { WorkspaceSettings, UserRole } from '../types';
+import { AdminUser } from '../api';
+import { resolveAvatarUrl } from '../avatar';
+import { useToast } from '../toast';
+import { useConfirm } from '../confirm';
+import Pagination from './Pagination';
 
-interface AdminUser {
-  id: string;
-  email: string;
-  username: string;
-  role: UserRole;
-}
+const PAGE_SIZE = 10;
 
 interface SettingsViewProps {
   settings: WorkspaceSettings;
   onSaveSettings: (settings: WorkspaceSettings) => void;
   users: AdminUser[];
-  onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ temporaryPassword: string }>;
+  onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ temporaryPassword: string; emailSent: boolean }>;
   onUpdateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) => Promise<void>;
   onRemoveUser: (id: string) => Promise<void>;
   currentUserId: string;
 }
 
 export default function SettingsView({ settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId }: SettingsViewProps) {
+  const { showToast } = useToast();
+  const confirm = useConfirm();
 
   // Local state initialized with current props
   const [companyName, setCompanyName] = useState(settings.companyName);
   const [timezone, setTimezone] = useState(settings.timezone);
-  const [plan, setPlan] = useState<'starter' | 'pro' | 'enterprise'>(settings.plan);
-  const [apiKey, setApiKey] = useState(settings.apiKey);
 
   // Add-member form state (uncommitted input only; the real user list lives in the `users` prop)
   const [showAddMember, setShowAddMember] = useState(false);
@@ -53,13 +48,20 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [roleUpdateError, setRoleUpdateError] = useState<string | null>(null);
 
+  // Edit-member modal state
+  const [editingMember, setEditingMember] = useState<AdminUser | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editRole, setEditRole] = useState<UserRole>('editor');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const [membersPage, setMembersPage] = useState(1);
+  const pagedUsers = users.slice((membersPage - 1) * PAGE_SIZE, membersPage * PAGE_SIZE);
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onSaveSettings({
       companyName,
       timezone,
-      plan,
-      apiKey,
       members: settings.members
     });
 
@@ -67,34 +69,27 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
     setTimeout(() => setSaveSuccess(false), 2000);
   };
 
-  const rotateApiKey = () => {
-    if (confirm("¿Estás seguro de que deseas rotar la clave de API del workspace? Todas las integraciones actuales dejarán de responder hasta que actualices la clave.")) {
-      const chars = 'abcdef0123456789';
-      let key = 'mp_live_';
-      for (let i = 0; i < 32; i++) {
-        key += chars[Math.floor(Math.random() * chars.length)];
-      }
-      setApiKey(key);
-      alert("¡Clave de API rotada con éxito! No olvides pulsar 'Guardar Configuración' para aplicar los cambios.");
-    }
-  };
-
   const handleAddMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName || !newMemberEmail) {
-      alert("Por favor, ingresa el nombre y email del nuevo miembro.");
+      showToast('Por favor, ingresa el nombre y email del nuevo miembro.', 'error');
       return;
     }
 
     try {
-      const { temporaryPassword } = await onAddUser({ email: newMemberEmail, username: newMemberName, role: newMemberRole });
-      alert(`Usuario creado. Contraseña temporal (compártela de forma segura, no volverá a mostrarse): ${temporaryPassword}`);
+      const { temporaryPassword, emailSent } = await onAddUser({ email: newMemberEmail, username: newMemberName, role: newMemberRole });
+      showToast(
+        emailSent
+          ? `Usuario creado. Se envió un correo de bienvenida a ${newMemberEmail} con su contraseña temporal.`
+          : `Usuario creado, pero no se pudo enviar el correo de bienvenida (SMTP no configurado). Contraseña temporal: ${temporaryPassword}`,
+        emailSent ? 'success' : 'info'
+      );
       setNewMemberName('');
       setNewMemberEmail('');
       setNewMemberRole('editor');
       setShowAddMember(false);
     } catch {
-      alert("No se pudo crear el usuario. Inténtalo de nuevo.");
+      showToast('No se pudo crear el usuario. Inténtalo de nuevo.', 'error');
     }
   };
 
@@ -107,14 +102,39 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
     }
   };
 
+  const openEditMember = (member: AdminUser) => {
+    setEditingMember(member);
+    setEditName(member.username);
+    setEditRole(member.role);
+  };
+
+  const handleEditMemberSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    setEditSaving(true);
+    try {
+      await onUpdateUser(editingMember.id, { username: editName, role: editRole });
+      setEditingMember(null);
+      showToast('Usuario actualizado.', 'success');
+    } catch {
+      showToast('No se pudo actualizar el usuario. Inténtalo de nuevo.', 'error');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const handleRemoveUser = async (id: string) => {
     const member = users.find(m => m.id === id);
-    if (confirm(`¿Eliminar a ${member?.username} de este workspace?`)) {
-      try {
-        await onRemoveUser(id);
-      } catch {
-        alert("No se pudo eliminar al usuario. Inténtalo de nuevo.");
-      }
+    const ok = await confirm(`¿Eliminar a ${member?.username} de este workspace? Esta acción no se puede deshacer.`, {
+      danger: true,
+      confirmLabel: 'Eliminar',
+    });
+    if (!ok) return;
+    try {
+      await onRemoveUser(id);
+      showToast(`${member?.username} eliminado del workspace.`, 'success');
+    } catch {
+      showToast('No se pudo eliminar al usuario. Inténtalo de nuevo.', 'error');
     }
   };
 
@@ -125,7 +145,7 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-slate-900 tracking-tight">Ajustes del Workspace</h1>
-          <p className="text-sm text-slate-500 font-medium">Administra la configuración general de la organización, roles, facturación e integraciones API.</p>
+          <p className="text-sm text-slate-500 font-medium">Administra la configuración general de la organización y los roles del equipo.</p>
         </div>
       </div>
 
@@ -136,11 +156,8 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
         </div>
       )}
 
-      <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        
-        {/* Left Column (8 cols): Organization Settings & Members management */}
-        <div className="lg:col-span-8 space-y-5">
-          
+      <form onSubmit={handleSave} className="max-w-3xl space-y-5">
+
           {/* General settings card */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-slate-300 transition-colors">
             <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">Información de la Organización</h3>
@@ -210,9 +227,18 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {users.map((mem) => (
+                  {pagedUsers.map((mem) => (
                     <tr key={mem.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 font-bold text-slate-900">{mem.username}</td>
+                      <td className="py-3">
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={resolveAvatarUrl(mem)}
+                            alt={mem.username}
+                            className="w-7 h-7 rounded-full border border-slate-200 object-cover shrink-0"
+                          />
+                          <span className="font-bold text-slate-900">{mem.username}</span>
+                        </div>
+                      </td>
                       <td className="py-3 font-medium text-slate-500 font-mono text-[11px]">{mem.email}</td>
                       <td className="py-3">
                         {mem.id === currentUserId ? (
@@ -239,99 +265,33 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
                         )}
                       </td>
                       <td className="py-3 text-right">
-                        {mem.id !== currentUserId && (
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
-                            onClick={() => handleRemoveUser(mem.id)}
-                            className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                            title="Eliminar del Workspace"
+                            onClick={() => openEditMember(mem)}
+                            className="p-1 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                            title="Editar Usuario"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Pencil className="w-3.5 h-3.5" />
                           </button>
-                        )}
+                          {mem.id !== currentUserId && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveUser(mem.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                              title="Eliminar del Workspace"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
-
-        </div>
-
-        {/* Right Column (4 cols): Plan Billing & Developer API rotation */}
-        <div className="lg:col-span-4 space-y-5">
-          
-          {/* Plan Billing select card */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-slate-300 transition-colors">
-            <div className="border-b border-slate-100 pb-3 mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <CreditCard className="w-4 h-4 text-indigo-600" />
-                Plan Activo
-              </h3>
-              <p className="text-xs text-slate-500 font-medium">Suscripción actual de tu servicio MonitorPro.</p>
-            </div>
-
-            <div className="space-y-3">
-              {[
-                { id: 'starter', name: 'Starter Plan', price: '$29/mes', features: '10 sitios, 60s intervalo' },
-                { id: 'pro', name: 'Professional Plan', price: '$79/mes', features: '50 sitios, 30s intervalo, SMS' },
-                { id: 'enterprise', name: 'Enterprise Premium', price: 'Custom', features: 'Sitios ilimitados, SLA formal, SSO' }
-              ].map((tier) => {
-                const isSelected = plan === tier.id;
-                return (
-                  <div
-                    key={tier.id}
-                    onClick={() => setPlan(tier.id as any)}
-                    className={`p-3.5 rounded-xl border text-xs cursor-pointer select-none transition-all ${
-                      isSelected
-                        ? 'border-indigo-600 bg-indigo-50/20 shadow-3xs'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex justify-between items-center font-bold">
-                      <span className="text-slate-950 font-display">{tier.name}</span>
-                      <span className="text-indigo-600 font-mono">{tier.price}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed">{tier.features}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Developer API credentials card */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-slate-300 transition-colors">
-            <div className="border-b border-slate-100 pb-3 mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <Key className="w-4 h-4 text-indigo-600" />
-                Desarrollo e Integraciones (API)
-              </h3>
-              <p className="text-xs text-slate-500 font-medium">Claves para automatizar y consultar estados remotamente.</p>
-            </div>
-
-            <div className="space-y-3 text-xs font-semibold">
-              <div>
-                <label className="block text-slate-600 uppercase mb-1.5">Clave de API del Workspace</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    readOnly
-                    value={apiKey}
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-lg p-2.5 font-mono text-[11px] text-indigo-400 focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={rotateApiKey}
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 border border-rose-200 bg-rose-50/50 hover:bg-rose-50 text-rose-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-              >
-                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                <span>Rotar Clave de API</span>
-              </button>
-            </div>
+            <Pagination page={membersPage} totalItems={users.length} pageSize={PAGE_SIZE} onPageChange={setMembersPage} />
           </div>
 
           {/* Form controls save */}
@@ -339,13 +299,11 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
             <button
               id="btn-save-settings"
               type="submit"
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-colors"
+              className="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-colors"
             >
               Guardar Cambios
             </button>
           </div>
-
-        </div>
 
       </form>
 
@@ -408,6 +366,75 @@ export default function SettingsView({ settings, onSaveSettings, users, onAddUse
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold cursor-pointer"
                 >
                   Enviar Invitación
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Member Popup Modal */}
+      {editingMember && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-sm w-full shadow-2xl overflow-hidden font-sans">
+            <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-white">
+              <h3 className="font-display font-bold text-sm tracking-wide">Editar Usuario</h3>
+              <button onClick={() => setEditingMember(null)} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditMemberSubmit} className="p-6 space-y-4 text-xs font-semibold">
+              <div className="flex items-center gap-3">
+                <img
+                  src={resolveAvatarUrl(editingMember)}
+                  alt={editingMember.username}
+                  className="w-12 h-12 rounded-full border border-slate-200 object-cover"
+                />
+                <span className="text-slate-500 font-mono text-[11px]">{editingMember.email}</span>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Nombre Completo</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Rol de Workspace</label>
+                <select
+                  value={editRole}
+                  disabled={editingMember.id === currentUserId}
+                  onChange={(e) => setEditRole(e.target.value as UserRole)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-hidden cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <option value="super-admin">Super Admin (Control total del workspace)</option>
+                  <option value="editor">Editor (Soporta ediciones y pings)</option>
+                </select>
+                {editingMember.id === currentUserId && (
+                  <span className="text-[10px] text-slate-400 font-medium block mt-1.5">No puedes cambiar tu propio rol.</span>
+                )}
+              </div>
+
+              <div className="flex gap-3 justify-end pt-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg font-bold cursor-pointer"
+                >
+                  {editSaving ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
             </form>

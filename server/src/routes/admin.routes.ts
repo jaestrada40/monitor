@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { pool } from '../db.js';
 import { hashPassword } from '../services/auth.service.js';
+import { sendWelcomeEmail } from '../services/email.service.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -10,14 +11,18 @@ export const adminRouter = Router();
 
 const VALID_ROLES = ['super-admin', 'editor'];
 
+function toUserDto(row: any) {
+  return { id: row.id, email: row.email, username: row.username, avatarUrl: row.avatar_url, role: row.role };
+}
+
 adminRouter.use(requireAuth);
 adminRouter.use(requireRole(['super-admin']));
 
 adminRouter.get('/', asyncHandler(async (_req, res) => {
   const result = await pool.query(
-    'SELECT id, email, username, role FROM users ORDER BY created_at ASC'
+    'SELECT id, email, username, avatar_url, role FROM users ORDER BY created_at ASC'
   );
-  res.json({ users: result.rows });
+  res.json({ users: result.rows.map(toUserDto) });
 }));
 
 adminRouter.post('/', asyncHandler(async (req, res) => {
@@ -46,12 +51,16 @@ adminRouter.post('/', asyncHandler(async (req, res) => {
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO users (email, password_hash, username, role) VALUES ($1, $2, $3, $4)
-       RETURNING id, email, username, role`,
+       RETURNING id, email, username, avatar_url, role`,
       [email, passwordHash, username || email.split('@')[0], role]
     );
-    user = result.rows[0];
+    user = toUserDto(result.rows[0]);
 
-    await client.query('INSERT INTO notification_settings (user_id, email_address) VALUES ($1, $2)', [user.id, email]);
+    await client.query('INSERT INTO notification_settings (user_id, email_address, email_addresses) VALUES ($1, $2, $3)', [
+      user.id,
+      email,
+      JSON.stringify([email]),
+    ]);
     await client.query('INSERT INTO workspace_settings (user_id) VALUES ($1)', [user.id]);
     await client.query('INSERT INTO scheduled_reports (user_id, recipient_email) VALUES ($1, $2)', [user.id, email]);
     await client.query('COMMIT');
@@ -62,7 +71,14 @@ adminRouter.post('/', asyncHandler(async (req, res) => {
     client.release();
   }
 
-  res.status(201).json({ user, temporaryPassword });
+  let emailSent = false;
+  try {
+    emailSent = await sendWelcomeEmail(email, user.username, temporaryPassword);
+  } catch (err) {
+    console.error(`Failed to send welcome email to ${email}:`, err);
+  }
+
+  res.status(201).json({ user, temporaryPassword, emailSent });
 }));
 
 adminRouter.put('/:id', asyncHandler(async (req, res) => {
@@ -83,14 +99,14 @@ adminRouter.put('/:id', asyncHandler(async (req, res) => {
        username = COALESCE($2, username),
        role = COALESCE($3, role)
      WHERE id = $1
-     RETURNING id, email, username, role`,
+     RETURNING id, email, username, avatar_url, role`,
     [id, username ?? null, role ?? null]
   );
   if (result.rows.length === 0) {
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  res.json({ user: result.rows[0] });
+  res.json({ user: toUserDto(result.rows[0]) });
 }));
 
 adminRouter.delete('/:id', asyncHandler(async (req, res) => {

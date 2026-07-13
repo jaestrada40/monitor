@@ -46,7 +46,7 @@ export interface Incident {
 
 export interface NotificationSettings {
   email: boolean;
-  emailAddress: string;
+  emailAddresses: string[];
   slack: boolean;
   slackWebhook: string;
   sms: boolean;
@@ -66,9 +66,7 @@ export interface WorkspaceMember {
 
 export interface WorkspaceSettings {
   companyName: string;
-  plan: 'starter' | 'pro' | 'enterprise';
   timezone: string;
-  apiKey: string;
   members: WorkspaceMember[];
 }
 

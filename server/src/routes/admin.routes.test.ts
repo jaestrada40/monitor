@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -6,6 +6,11 @@ import { pool } from '../db.js';
 import { hashPassword } from '../services/auth.service.js';
 import { authRouter } from './auth.routes.js';
 import { adminRouter } from './admin.routes.js';
+
+const sendWelcomeEmailMock = vi.fn().mockResolvedValue(true);
+vi.mock('../services/email.service.js', () => ({
+  sendWelcomeEmail: (...args: unknown[]) => sendWelcomeEmailMock(...args),
+}));
 
 function buildApp() {
   const app = express();
@@ -99,6 +104,8 @@ describe('admin routes', () => {
     expect(typeof res.body.temporaryPassword).toBe('string');
     expect(res.body.temporaryPassword.length).toBeGreaterThan(0);
     expect(res.body.user.password_hash).toBeUndefined();
+    expect(res.body.emailSent).toBe(true);
+    expect(sendWelcomeEmailMock).toHaveBeenCalledWith(NEW_USER_EMAIL, 'NewUser', res.body.temporaryPassword);
 
     const loginRes = await request(app)
       .post('/api/auth/login')

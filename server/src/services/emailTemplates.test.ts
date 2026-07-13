@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, incidentCreatedEmail, reportEmail } from './emailTemplates.js';
+import { escapeHtml, incidentCreatedEmail, reportEmail, welcomeEmail } from './emailTemplates.js';
 
 describe('escapeHtml', () => {
   it('escapes HTML-significant characters', () => {
@@ -42,5 +42,17 @@ describe('reportEmail', () => {
     expect(html).toContain('2/3');
     expect(html).toContain('Portal &lt;script&gt;');
     expect(text).toContain('SLA cumplido: 75%');
+  });
+});
+
+describe('welcomeEmail', () => {
+  it('includes the temporary password and login link, and escapes the username', () => {
+    const { html, text } = welcomeEmail('<b>Juan</b>', 'juan@example.com', 'tempPass123!', 'https://app.example.com');
+    expect(html).toContain('&lt;b&gt;Juan&lt;/b&gt;');
+    expect(html).toContain('tempPass123!');
+    expect(html).toContain('juan@example.com');
+    expect(html).toContain('https://app.example.com');
+    expect(text).toContain('tempPass123!');
+    expect(text).toContain('https://app.example.com');
   });
 });
