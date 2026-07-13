@@ -59,6 +59,7 @@ describe('incidents routes', () => {
 
   afterAll(async () => {
     await pool.query("DELETE FROM users WHERE email = 'incidents-test@example.com'");
+    await pool.query("DELETE FROM users WHERE email = 'incidents-test-other@example.com'");
     await pool.end();
   });
 
@@ -78,5 +79,34 @@ describe('incidents routes', () => {
     expect(resolveRes.status).toBe(200);
     expect(resolveRes.body.incident.status).toBe('resolved');
     expect(resolveRes.body.incident.duration).toBeTruthy();
+  });
+
+  it('prevents cross-user access to another user\'s incident', async () => {
+    await pool.query("DELETE FROM users WHERE email = 'incidents-test-other@example.com'");
+    await createTestUser('incidents-test-other@example.com', 'Other Tester');
+    const otherLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'incidents-test-other@example.com', password: 'testpass123' });
+    const otherCookie = otherLoginRes.headers['set-cookie'][0];
+
+    const listRes = await request(app).get('/api/incidents').set('Cookie', otherCookie);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.incidents.some((i: any) => i.id === incidentId)).toBe(false);
+
+    const before = await pool.query('SELECT status FROM incidents WHERE id = $1', [incidentId]);
+    const statusBefore = before.rows[0].status;
+
+    const ackRes = await request(app)
+      .post(`/api/incidents/${incidentId}/acknowledge`)
+      .set('Cookie', otherCookie);
+    expect(ackRes.status).toBe(404);
+
+    const resolveRes = await request(app)
+      .post(`/api/incidents/${incidentId}/resolve`)
+      .set('Cookie', otherCookie);
+    expect(resolveRes.status).toBe(404);
+
+    const after = await pool.query('SELECT status FROM incidents WHERE id = $1', [incidentId]);
+    expect(after.rows[0].status).toBe(statusBefore);
   });
 });
