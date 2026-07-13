@@ -8,7 +8,7 @@ vi.mock('nodemailer', () => ({
   },
 }));
 
-import { sendIncidentEmail } from './email.service.js';
+import { sendIncidentEmail, sendReportEmail, sendTestEmail } from './email.service.js';
 
 describe('email.service', () => {
   beforeEach(() => {
@@ -39,5 +39,30 @@ describe('email.service', () => {
       sendIncidentEmail({ to: 'user@example.com', websiteName: 'X', kind: 'resolved' })
     ).resolves.toBeUndefined();
     expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it('sends a scheduled report email with the summary figures and per-site uptime in the body', async () => {
+    await sendReportEmail('user@example.com', 'weekly', {
+      slaPercentage: 80,
+      mttrMinutes: 15,
+      resolvedCount: 3,
+      totalCount: 4,
+      perSiteUptime: [{ id: '1', name: 'Portal de Clientes', uptime: 99.95 }],
+    });
+
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    const call = sendMailMock.mock.calls[0][0];
+    expect(call.to).toBe('user@example.com');
+    expect(call.subject).toContain('semanal');
+    expect(call.text).toContain('SLA cumplido: 80%');
+    expect(call.text).toContain('Portal de Clientes: 99.95% uptime');
+  });
+
+  it('sends a test email to the given address', async () => {
+    await sendTestEmail('user@example.com');
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    const call = sendMailMock.mock.calls[0][0];
+    expect(call.to).toBe('user@example.com');
+    expect(call.subject).toContain('prueba');
   });
 });

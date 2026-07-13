@@ -83,3 +83,19 @@ CREATE TABLE IF NOT EXISTS workspace_settings (
   timezone TEXT NOT NULL DEFAULT 'UTC',
   api_key TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  frequency TEXT NOT NULL DEFAULT 'weekly',
+  recipient_email TEXT NOT NULL DEFAULT '',
+  last_sent_at TIMESTAMPTZ
+);
+
+-- Backfill a disabled schedule row for any user created before this table existed.
+INSERT INTO scheduled_reports (user_id, recipient_email)
+SELECT u.id, COALESCE(n.email_address, '')
+FROM users u
+LEFT JOIN notification_settings n ON n.user_id = u.id
+WHERE NOT EXISTS (SELECT 1 FROM scheduled_reports sr WHERE sr.user_id = u.id);

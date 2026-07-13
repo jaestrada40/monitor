@@ -7,7 +7,9 @@ import { websitesRouter } from './routes/websites.routes.js';
 import { incidentsRouter } from './routes/incidents.routes.js';
 import { settingsRouter } from './routes/settings.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
+import { reportsRouter } from './routes/reports.routes.js';
 import { startScheduler } from './services/scheduler.js';
+import { startReportScheduler } from './services/reportScheduler.js';
 import { seedAdminIfNeeded } from './seed.js';
 import { pool } from './db.js';
 
@@ -31,6 +33,7 @@ app.use('/api/websites', websitesRouter);
 app.use('/api/incidents', incidentsRouter);
 app.use('/api', settingsRouter);
 app.use('/api/admin/users', adminRouter);
+app.use('/api/reports', reportsRouter);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled route error:', err);
@@ -45,6 +48,7 @@ async function start() {
   await seedAdminIfNeeded(pool);
 
   startScheduler(pool);
+  startReportScheduler(pool);
 
   app.listen(port, () => {
     console.log(`MonitorPro API listening on port ${port}`);

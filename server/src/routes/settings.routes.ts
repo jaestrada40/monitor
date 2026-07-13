@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { sendTestEmail } from '../services/email.service.js';
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -51,6 +52,25 @@ settingsRouter.put('/notifications', asyncHandler(async (req, res) => {
     ]
   );
   res.json({ notifications: toNotificationsDto(result.rows[0]) });
+}));
+
+settingsRouter.post('/notifications/test-email', asyncHandler(async (req, res) => {
+  const { emailAddress } = req.body ?? {};
+  if (typeof emailAddress !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
+    res.status(400).json({ error: 'invalid_email' });
+    return;
+  }
+  if (!process.env.SMTP_HOST) {
+    res.status(503).json({ error: 'smtp_not_configured' });
+    return;
+  }
+  try {
+    await sendTestEmail(emailAddress);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Test email failed:', err);
+    res.status(502).json({ error: 'send_failed' });
+  }
 }));
 
 settingsRouter.get('/settings', asyncHandler(async (req, res) => {

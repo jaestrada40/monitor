@@ -52,6 +52,7 @@ describe('seedAdminIfNeeded', () => {
       .mockResolvedValueOnce({ rows: [{ id: 'user-1' }] }) // INSERT INTO users ... RETURNING id
       .mockResolvedValueOnce(undefined) // INSERT INTO notification_settings
       .mockResolvedValueOnce(undefined) // INSERT INTO workspace_settings
+      .mockResolvedValueOnce(undefined) // INSERT INTO scheduled_reports
       .mockResolvedValueOnce(undefined); // COMMIT
 
     await seedAdminIfNeeded(pool);
@@ -80,7 +81,10 @@ describe('seedAdminIfNeeded', () => {
     expect(calls[3][0]).toMatch(/INSERT INTO workspace_settings/);
     expect(calls[3][1]).toEqual(['user-1']);
 
-    expect(calls[4][0]).toBe('COMMIT');
+    expect(calls[4][0]).toMatch(/INSERT INTO scheduled_reports/);
+    expect(calls[4][1]).toEqual(['user-1', ADMIN_EMAIL]);
+
+    expect(calls[5][0]).toBe('COMMIT');
 
     expect(client.release).toHaveBeenCalledTimes(1);
   });

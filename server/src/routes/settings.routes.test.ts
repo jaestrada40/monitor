@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -6,6 +6,9 @@ import { pool } from '../db.js';
 import { hashPassword } from '../services/auth.service.js';
 import { authRouter } from './auth.routes.js';
 import { settingsRouter } from './settings.routes.js';
+
+const sendTestEmailMock = vi.fn().mockResolvedValue(undefined);
+vi.mock('../services/email.service.js', () => ({ sendTestEmail: (...args: unknown[]) => sendTestEmailMock(...args) }));
 
 async function createTestUser(email: string, username: string) {
   const passwordHash = await hashPassword('testpass123');
@@ -56,6 +59,38 @@ describe('settings routes', () => {
       .send({ ...getRes.body.notifications, thresholdResponseTime: 750 });
     expect(putRes.status).toBe(200);
     expect(putRes.body.notifications.thresholdResponseTime).toBe(750);
+  });
+
+  it('rejects an invalid email for the test-email endpoint', async () => {
+    const res = await request(app)
+      .post('/api/notifications/test-email')
+      .set('Cookie', cookie)
+      .send({ emailAddress: 'not-an-email' });
+    expect(res.status).toBe(400);
+    expect(sendTestEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('sends a real test email when SMTP is configured', async () => {
+    const original = process.env.SMTP_HOST;
+    process.env.SMTP_HOST = 'smtp.example.com';
+    const res = await request(app)
+      .post('/api/notifications/test-email')
+      .set('Cookie', cookie)
+      .send({ emailAddress: 'alerts@example.com' });
+    expect(res.status).toBe(200);
+    expect(sendTestEmailMock).toHaveBeenCalledWith('alerts@example.com');
+    process.env.SMTP_HOST = original;
+  });
+
+  it('returns 503 when SMTP is not configured', async () => {
+    const original = process.env.SMTP_HOST;
+    delete process.env.SMTP_HOST;
+    const res = await request(app)
+      .post('/api/notifications/test-email')
+      .set('Cookie', cookie)
+      .send({ emailAddress: 'alerts@example.com' });
+    expect(res.status).toBe(503);
+    process.env.SMTP_HOST = original;
   });
 
   it('reads and updates workspace settings', async () => {

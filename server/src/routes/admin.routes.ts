@@ -53,6 +53,7 @@ adminRouter.post('/', asyncHandler(async (req, res) => {
 
     await client.query('INSERT INTO notification_settings (user_id, email_address) VALUES ($1, $2)', [user.id, email]);
     await client.query('INSERT INTO workspace_settings (user_id) VALUES ($1)', [user.id]);
+    await client.query('INSERT INTO scheduled_reports (user_id, recipient_email) VALUES ($1, $2)', [user.id, email]);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');

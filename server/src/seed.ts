@@ -30,6 +30,7 @@ export async function seedAdminIfNeeded(pool: Pool): Promise<void> {
     const userId = result.rows[0].id;
     await client.query('INSERT INTO notification_settings (user_id, email_address) VALUES ($1, $2)', [userId, email]);
     await client.query('INSERT INTO workspace_settings (user_id) VALUES ($1)', [userId]);
+    await client.query('INSERT INTO scheduled_reports (user_id, recipient_email) VALUES ($1, $2)', [userId, email]);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');

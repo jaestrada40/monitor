@@ -10,6 +10,8 @@ import {
   Incident,
   NotificationSettings,
   WorkspaceSettings,
+  ReportSummary,
+  ScheduledReport,
 } from './types';
 
 export interface AdminUser {
@@ -60,11 +62,19 @@ export const api = {
     get: () => request<{ notifications: NotificationSettings }>('/notifications'),
     update: (data: NotificationSettings) =>
       request<{ notifications: NotificationSettings }>('/notifications', { method: 'PUT', body: JSON.stringify(data) }),
+    testEmail: (emailAddress: string) =>
+      request<{ ok: true }>('/notifications/test-email', { method: 'POST', body: JSON.stringify({ emailAddress }) }),
   },
   settings: {
     get: () => request<{ settings: WorkspaceSettings }>('/settings'),
     update: (data: WorkspaceSettings) =>
       request<{ settings: WorkspaceSettings }>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  reports: {
+    summary: (days: number) => request<ReportSummary>(`/reports/summary?days=${days}`),
+    getSchedule: () => request<{ schedule: ScheduledReport }>('/reports/schedule'),
+    updateSchedule: (data: ScheduledReport) =>
+      request<{ schedule: ScheduledReport }>('/reports/schedule', { method: 'PUT', body: JSON.stringify(data) }),
   },
   admin: {
     listUsers: () => request<{ users: AdminUser[] }>('/admin/users'),

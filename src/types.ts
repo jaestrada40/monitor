@@ -72,6 +72,21 @@ export interface WorkspaceSettings {
   members: WorkspaceMember[];
 }
 
+export interface ReportSummary {
+  slaPercentage: number;
+  mttrMinutes: number | null;
+  resolvedCount: number;
+  totalCount: number;
+  perSiteUptime: { id: string; name: string; uptime: number }[];
+}
+
+export interface ScheduledReport {
+  enabled: boolean;
+  frequency: 'weekly' | 'monthly';
+  recipientEmail: string;
+  lastSentAt: string | null;
+}
+
 export type ViewType =
   | 'login'
   | 'dashboard'

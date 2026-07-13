@@ -233,10 +233,7 @@ export default function App() {
         );
       case 'reports':
         return (
-          <ReportsView
-            websites={websites}
-            incidents={incidents}
-          />
+          <ReportsView companyName={settings?.companyName ?? ''} />
         );
       case 'notifications':
         return (
