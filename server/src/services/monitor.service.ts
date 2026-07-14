@@ -18,7 +18,29 @@ const BROWSER_USER_AGENT =
 // genuinely broken site — worth a second check with a real browser before alerting.
 const LIKELY_BOT_BLOCK_STATUS_CODES = new Set([401, 403, 429]);
 
-async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusCode?: number }> {
+// Hosting/domain providers usually serve these pages with a plain 200 OK, so status code
+// alone can't catch "the provider suspended the account for non-payment" — it looks
+// identical to a healthy site unless we look at the actual page text.
+const SUSPENSION_MARKERS = [
+  'account has been suspended',
+  'account suspended',
+  'this domain has expired',
+  'domain has expired',
+  'website is currently suspended',
+  'suspended due to non-payment',
+  'cuenta ha sido suspendida',
+  'cuenta suspendida',
+  'dominio ha expirado',
+  'sitio suspendido',
+  'hosting suspendido',
+];
+
+function containsSuspensionMarkers(bodyText: string): boolean {
+  const lower = bodyText.toLowerCase();
+  return SUSPENSION_MARKERS.some((marker) => lower.includes(marker));
+}
+
+async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusCode?: number; suspended?: boolean }> {
   const start = Date.now();
   try {
     const controller = new AbortController();
@@ -31,7 +53,11 @@ async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusC
       },
     });
     clearTimeout(timeout);
-    return { ok: response.ok, ms: Date.now() - start, statusCode: response.status };
+    // Cap how much we read — we only need enough of the page to catch a suspension
+    // banner, not the whole document (which could be several MB on a heavy site).
+    const bodyText = typeof response.text === 'function' ? await response.text().catch(() => '') : '';
+    const suspended = containsSuspensionMarkers(bodyText.slice(0, 20_000));
+    return { ok: response.ok && !suspended, ms: Date.now() - start, statusCode: response.status, suspended };
   } catch {
     return { ok: false, ms: -1 };
   }
@@ -48,7 +74,7 @@ async function getBrowser(): Promise<Browser> {
 // Renders the page in a real (headless) browser so JS-based WAF challenges (e.g. Cloudflare)
 // resolve the same way they would for a real visitor. Only used as a fallback for likely
 // bot-block status codes — too slow/heavy to run on every check.
-async function browserCheck(url: string): Promise<{ ok: boolean; ms: number }> {
+async function browserCheck(url: string): Promise<{ ok: boolean; ms: number; suspended?: boolean }> {
   const start = Date.now();
   let context;
   try {
@@ -56,7 +82,9 @@ async function browserCheck(url: string): Promise<{ ok: boolean; ms: number }> {
     context = await browser.newContext({ userAgent: BROWSER_USER_AGENT });
     const page = await context.newPage();
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    return { ok: !!response && response.ok(), ms: Date.now() - start };
+    const bodyText = await page.content().catch(() => '');
+    const suspended = containsSuspensionMarkers(bodyText.slice(0, 20_000));
+    return { ok: !!response && response.ok() && !suspended, ms: Date.now() - start, suspended };
   } catch {
     return { ok: false, ms: -1 };
   } finally {
@@ -211,6 +239,20 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   // specifically. Downgrade to a warning instead of a critical "down" alert to avoid paging
   // anyone over a false positive we can't fix from our side (see checkWebsite tests/history).
   const isLikelyWafBlock = !result.ok && result.statusCode !== undefined && LIKELY_BOT_BLOCK_STATUS_CODES.has(result.statusCode);
+
+  // Suspension pages typically respond with 200 OK, so this must be checked before
+  // anything else that branches on statusCode — a suspended site is always a real outage,
+  // never a WAF false positive.
+  if (result.suspended) {
+    await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);
+    await createIncidentIfNeeded(
+      pool,
+      website.id,
+      'critical',
+      'El sitio respondió con una página de "cuenta/dominio suspendido" — probablemente el proveedor de hosting o dominio no fue pagado.'
+    );
+    return;
+  }
 
   if (!result.ok && isLikelyWafBlock) {
     await pool.query("UPDATE websites SET status = 'degraded' WHERE id = $1", [website.id]);
