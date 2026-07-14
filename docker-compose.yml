@@ -44,7 +44,7 @@ services:
     # for the browser checks would be stronger isolation still, but is a bigger
     # architecture change (IPC/queue between services) than this warrants right now.
     mem_limit: 1g
-    cpus: 1.5
+    cpus: 0.9
     security_opt:
       - no-new-privileges:true
 
