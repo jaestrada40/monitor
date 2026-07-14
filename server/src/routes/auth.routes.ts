@@ -177,6 +177,25 @@ authRouter.put('/me/avatar', requireAuth, asyncHandler(async (req, res) => {
   res.json({ user: toUserDto(result.rows[0]) });
 }));
 
+authRouter.put('/me/password', requireAuth, asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body ?? {};
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || newPassword.length < 8) {
+    res.status(400).json({ error: 'invalid_request' });
+    return;
+  }
+
+  const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
+  const user = result.rows[0];
+  if (!user || !(await verifyPassword(currentPassword, user.password_hash))) {
+    res.status(401).json({ error: 'invalid_current_password' });
+    return;
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, req.userId]);
+  res.json({ ok: true });
+}));
+
 // --- MFA setup/management (self-service, requires an existing session) ---
 
 authRouter.post('/mfa/setup', requireAuth, asyncHandler(async (req, res) => {

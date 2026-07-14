@@ -12,7 +12,8 @@ import {
   Pencil,
   X,
   KeyRound,
-  ShieldOff
+  ShieldOff,
+  Lock
 } from 'lucide-react';
 import { WorkspaceSettings, UserRole, UserSession } from '../types';
 import { AdminUser } from '../api';
@@ -35,11 +36,12 @@ interface SettingsViewProps {
   onMfaSetup: () => Promise<{ secret: string; qrCodeDataUrl: string }>;
   onMfaVerifySetup: (token: string) => Promise<void>;
   onMfaDisable: (token: string) => Promise<void>;
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 export default function SettingsView({
   settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId,
-  user, onMfaSetup, onMfaVerifySetup, onMfaDisable,
+  user, onMfaSetup, onMfaVerifySetup, onMfaDisable, onChangePassword,
 }: SettingsViewProps) {
   const { showToast } = useToast();
   const confirm = useConfirm();
@@ -75,6 +77,13 @@ export default function SettingsView({
   const [mfaDisableCode, setMfaDisableCode] = useState('');
   const [mfaDisableSaving, setMfaDisableSaving] = useState(false);
   const [mfaDisableError, setMfaDisableError] = useState('');
+
+  // Change-password form state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
 
   const [membersPage, setMembersPage] = useState(1);
   const pagedUsers = users.slice((membersPage - 1) * PAGE_SIZE, membersPage * PAGE_SIZE);
@@ -193,6 +202,31 @@ export default function SettingsView({
       setMfaSetupCode('');
     } finally {
       setMfaSetupSaving(false);
+    }
+  };
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    if (newPassword.length < 8) {
+      setPasswordError('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Las contraseñas nuevas no coinciden.');
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await onChangePassword(currentPassword, newPassword);
+      showToast('Contraseña actualizada correctamente.', 'success');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch {
+      setPasswordError('No se pudo cambiar la contraseña. Verifica tu contraseña actual.');
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -373,6 +407,67 @@ export default function SettingsView({
               </table>
             </div>
             <Pagination page={membersPage} totalItems={users.length} pageSize={PAGE_SIZE} onPageChange={setMembersPage} />
+          </div>
+
+          {/* Change password card */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-slate-300 transition-colors">
+            <div className="border-b border-slate-100 pb-3 mb-4">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <Lock className="w-4 h-4 text-indigo-600" />
+                Cambiar Contraseña
+              </h3>
+              <p className="text-xs text-slate-500 font-medium">Actualiza la contraseña de tu cuenta ({user.email}).</p>
+            </div>
+
+            <form onSubmit={handleChangePasswordSubmit} className="max-w-sm space-y-3 text-xs font-semibold">
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Contraseña Actual</label>
+                <input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Nueva Contraseña</label>
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-600 uppercase mb-1.5">Confirmar Nueva Contraseña</label>
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
+                />
+              </div>
+
+              {passwordError && (
+                <p className="text-[11px] font-semibold text-rose-600">{passwordError}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={passwordSaving}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg font-bold cursor-pointer transition-colors"
+              >
+                {passwordSaving ? 'Guardando...' : 'Actualizar Contraseña'}
+              </button>
+            </form>
           </div>
 
           {/* Security / MFA card */}

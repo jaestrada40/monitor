@@ -260,6 +260,9 @@ export default function App() {
               await api.auth.mfaDisable(token);
               setUser({ ...user, mfaEnabled: false });
             }}
+            onChangePassword={async (currentPassword, newPassword) => {
+              await api.auth.changePassword(currentPassword, newPassword);
+            }}
           />
         );
       default:
