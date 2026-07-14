@@ -140,11 +140,26 @@ export function pinnedResolve(hostname: string): Promise<{ address: string; fami
 // validate a public IP and have the actual connection land on a different (private) one.
 // This is what actually closes the TOCTOU gap; assertSafeUrl above is only a fast
 // early-rejection pass with a clearer error, not the real guarantee.
+//
+// Node's http/https/net (Happy Eyeballs / autoSelectFamily, on by default since Node 20)
+// calls this with `{ all: true }` and expects an *array* of addresses back — calling back
+// with a single address unconditionally silently breaks that path (net.js ends up with
+// an undefined address and throws ERR_INVALID_IP_ADDRESS). Both call shapes are handled.
 export function createPinnedLookup() {
-  return (hostname: string, _options: dnsCallback.LookupOneOptions, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
+  return (
+    hostname: string,
+    options: dnsCallback.LookupOneOptions | dnsCallback.LookupAllOptions,
+    callback: (err: NodeJS.ErrnoException | null, address: unknown, family?: number) => void
+  ) => {
     pinnedResolve(hostname)
-      .then((safe) => callback(null, safe.address, safe.family))
-      .catch((err) => callback(err, '', 4));
+      .then((safe) => {
+        if ((options as dnsCallback.LookupAllOptions)?.all) {
+          callback(null, [safe]);
+        } else {
+          callback(null, safe.address, safe.family);
+        }
+      })
+      .catch((err) => callback(err, (options as dnsCallback.LookupAllOptions)?.all ? [] : '', 4));
   };
 }
 
