@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { authRouter } from './routes/auth.routes.js';
 import { websitesRouter } from './routes/websites.routes.js';
@@ -23,6 +24,9 @@ const app = express();
 // Behind the Nginx reverse proxy in production, req.ip would otherwise always resolve to
 // the proxy's own address — this makes express-rate-limit see the real client IP.
 app.set('trust proxy', 1);
+// This is a JSON API, not an HTML app — the default CSP is meant for pages that load
+// scripts/styles/images and would just add noise here without protecting anything real.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN, credentials: true }));
 // Raised from the 100kb default to fit small base64 avatar uploads (capped separately
 // per-field in the avatar route).
