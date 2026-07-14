@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { chromium, type Browser } from 'playwright';
 import { sendIncidentEmail, sendSslExpiryEmail } from './email.service.js';
 import { checkSsl } from './ssl.service.js';
+import { assertSafeUrl } from './ssrf-guard.js';
 
 interface WebsiteCheckTarget {
   id: string;
@@ -212,6 +213,16 @@ async function checkSslAndAlert(pool: Pool, website: WebsiteCheckTarget) {
 }
 
 export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
+  // Re-checked here (not just at registration) because a hostname's DNS can change between
+  // when a user registers it and when this periodic check runs (DNS rebinding) — the check
+  // itself is what actually calls fetch()/Chromium against the resolved address.
+  try {
+    await assertSafeUrl(website.url);
+  } catch {
+    await pool.query('UPDATE websites SET last_checked = now() WHERE id = $1', [website.id]);
+    return;
+  }
+
   let result = await pingOnce(website.url);
   if (!result.ok) {
     result = await pingOnce(website.url);

@@ -78,7 +78,7 @@ describe('websites routes', () => {
     const createRes = await request(app)
       .post('/api/websites')
       .set('Cookie', cookie)
-      .send({ name: 'Owner Site', url: 'https://owner.example.com', checkInterval: 60 });
+      .send({ name: 'Owner Site', url: 'https://example.org', checkInterval: 60 });
     expect(createRes.status).toBe(201);
     const websiteId = createRes.body.website.id;
 
@@ -103,7 +103,7 @@ describe('websites routes', () => {
     const createRes = await request(app)
       .post('/api/websites')
       .set('Cookie', cookie)
-      .send({ name: 'Latency Site', url: 'https://latency.example.com', checkInterval: 60 });
+      .send({ name: 'Latency Site', url: 'https://example.net', checkInterval: 60 });
     const websiteId = createRes.body.website.id;
 
     await pool.query(

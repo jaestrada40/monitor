@@ -3,6 +3,7 @@ import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { computeUptimeStats } from '../services/uptime.service.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { assertSafeUrl } from '../services/ssrf-guard.js';
 
 export const websitesRouter = Router();
 websitesRouter.use(requireAuth);
@@ -60,7 +61,7 @@ websitesRouter.post('/', asyncHandler(async (req, res) => {
     return;
   }
   try {
-    new URL(url);
+    await assertSafeUrl(url);
   } catch {
     res.status(400).json({ error: 'invalid_url' });
     return;
@@ -77,7 +78,7 @@ websitesRouter.put('/:id', asyncHandler(async (req, res) => {
   const { name, url, checkInterval, tags } = req.body ?? {};
   if (url !== undefined) {
     try {
-      new URL(url);
+      await assertSafeUrl(url);
     } catch {
       res.status(400).json({ error: 'invalid_url' });
       return;
