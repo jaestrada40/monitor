@@ -177,6 +177,29 @@ export function welcomeEmail(
   return { subject, html, text };
 }
 
+export function welcomeActivationEmail(
+  username: string,
+  email: string,
+  activationUrl: string
+): { subject: string; html: string; text: string } {
+  const subject = '[MonitorPro] Te invitaron a un workspace';
+  const html = shell(
+    `Tu cuenta de MonitorPro está lista`,
+    `
+    <div style="margin-bottom:16px;">${badge('Invitación', 'success')}</div>
+    <h1 style="margin:0 0 8px;font-size:20px;color:#0f172a;">¡Bienvenido, ${escapeHtml(username)}!</h1>
+    <p style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.5;">
+      Se creó una cuenta para ti en MonitorPro (${escapeHtml(email)}). Este enlace es válido por 1 hora
+      y te permite elegir tu propia contraseña para activar la cuenta.
+    </p>
+    <a href="${activationUrl}" style="display:inline-block;padding:10px 20px;background-color:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:700;">Activar mi cuenta</a>
+    <p style="margin:20px 0 0;font-size:11px;color:#94a3b8;word-break:break-all;">${escapeHtml(activationUrl)}</p>
+    `
+  );
+  const text = `Se creó una cuenta para ti en MonitorPro (${email}).\n\nActiva tu cuenta y elige tu contraseña aquí (válido por 1 hora):\n\n${activationUrl}`;
+  return { subject, html, text };
+}
+
 export function testEmail(): { subject: string; html: string; text: string } {
   const subject = '[MonitorPro] Correo de prueba';
   const html = shell(

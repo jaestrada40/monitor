@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { pool } from '../db.js';
-import { hashPassword } from '../services/auth.service.js';
-import { sendWelcomeEmail } from '../services/email.service.js';
+import { hashPassword, generatePasswordResetToken } from '../services/auth.service.js';
+import { sendWelcomeActivationEmail } from '../services/email.service.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -49,17 +49,22 @@ adminRouter.post('/', asyncHandler(async (req, res) => {
     return;
   }
 
-  const temporaryPassword = crypto.randomBytes(9).toString('base64url');
-  const passwordHash = await hashPassword(temporaryPassword);
+  // The account gets an unguessable, never-revealed password — nobody can log in with it.
+  // The only way in is the one-time activation link below (reusing the same reset-token
+  // machinery as "forgot password"), which lets the new user set their own password.
+  const passwordHash = await hashPassword(crypto.randomBytes(32).toString('base64url'));
+  const { rawToken, tokenHash } = generatePasswordResetToken();
+  const tokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
   const client = await pool.connect();
   let user;
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO users (email, password_hash, username, role) VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (email, password_hash, username, role, reset_token_hash, reset_token_expires)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, email, username, avatar_url, role`,
-      [email, passwordHash, username || email.split('@')[0], role]
+      [email, passwordHash, username || email.split('@')[0], role, tokenHash, tokenExpires]
     );
     user = toUserDto(result.rows[0]);
 
@@ -80,12 +85,18 @@ adminRouter.post('/', asyncHandler(async (req, res) => {
 
   let emailSent = false;
   try {
-    emailSent = await sendWelcomeEmail(email, user.username, temporaryPassword);
+    emailSent = await sendWelcomeActivationEmail(email, user.username, rawToken);
   } catch (err) {
     console.error(`Failed to send welcome email to ${email}:`, err);
   }
 
-  res.status(201).json({ user, temporaryPassword, emailSent });
+  // Only when we couldn't email it — the raw token is the fallback way for the admin to
+  // hand the new user a working activation link, never a password.
+  const activationUrl = emailSent
+    ? undefined
+    : `${process.env.FRONTEND_ORIGIN || 'http://localhost:3000'}/?resetToken=${encodeURIComponent(rawToken)}`;
+
+  res.status(201).json({ user, activationUrl, emailSent });
 }));
 
 adminRouter.put('/:id', asyncHandler(async (req, res) => {

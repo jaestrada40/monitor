@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { ReportSummary } from './report.service.js';
-import { incidentCreatedEmail, incidentResolvedEmail, testEmail, reportEmail, welcomeEmail, passwordResetEmail, sslExpiryEmail } from './emailTemplates.js';
+import { incidentCreatedEmail, incidentResolvedEmail, testEmail, reportEmail, welcomeActivationEmail, passwordResetEmail, sslExpiryEmail } from './emailTemplates.js';
 
 interface IncidentEmailParams {
   to: string | string[];
@@ -79,16 +79,18 @@ export async function sendTestEmail(to: string): Promise<void> {
 }
 
 // Returns whether the email was actually sent, so callers can fall back to surfacing the
-// temporary password directly (e.g. SMTP not configured in this environment).
-export async function sendWelcomeEmail(to: string, username: string, temporaryPassword: string): Promise<boolean> {
+// raw activation link directly (e.g. SMTP not configured in this environment) — never a
+// password, since the account has no usable password until this link is redeemed.
+export async function sendWelcomeActivationEmail(to: string, username: string, rawToken: string): Promise<boolean> {
   if (!process.env.SMTP_HOST) {
     console.warn('SMTP_HOST not configured — skipping welcome email.');
     return false;
   }
 
   const transport = getTransport();
-  const loginUrl = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
-  const { subject, html, text } = welcomeEmail(username, to, temporaryPassword, loginUrl);
+  const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+  const activationUrl = `${frontendOrigin}/?resetToken=${encodeURIComponent(rawToken)}`;
+  const { subject, html, text } = welcomeActivationEmail(username, to, activationUrl);
 
   await transport.sendMail({
     from: process.env.SMTP_FROM || 'alerts@monitorpro.io',

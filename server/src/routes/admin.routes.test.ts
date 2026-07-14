@@ -7,9 +7,9 @@ import { hashPassword } from '../services/auth.service.js';
 import { authRouter } from './auth.routes.js';
 import { adminRouter } from './admin.routes.js';
 
-const sendWelcomeEmailMock = vi.fn().mockResolvedValue(true);
+const sendWelcomeActivationEmailMock = vi.fn().mockResolvedValue(true);
 vi.mock('../services/email.service.js', () => ({
-  sendWelcomeEmail: (...args: unknown[]) => sendWelcomeEmailMock(...args),
+  sendWelcomeActivationEmail: (...args: unknown[]) => sendWelcomeActivationEmailMock(...args),
 }));
 
 function buildApp() {
@@ -93,7 +93,7 @@ describe('admin routes', () => {
     expect(res.status).toBe(403);
   });
 
-  it('allows an owner to create a user and the temp password works for login', async () => {
+  it('allows an owner to create a user and the activation link sets a working password', async () => {
     const res = await request(app)
       .post('/api/admin/users')
       .set('Cookie', ownerCookie)
@@ -101,15 +101,28 @@ describe('admin routes', () => {
     expect(res.status).toBe(201);
     expect(res.body.user.email).toBe(NEW_USER_EMAIL);
     expect(res.body.user.role).toBe('editor');
-    expect(typeof res.body.temporaryPassword).toBe('string');
-    expect(res.body.temporaryPassword.length).toBeGreaterThan(0);
     expect(res.body.user.password_hash).toBeUndefined();
     expect(res.body.emailSent).toBe(true);
-    expect(sendWelcomeEmailMock).toHaveBeenCalledWith(NEW_USER_EMAIL, 'NewUser', res.body.temporaryPassword);
+    // Never returned in the response once the email succeeded — only as a fallback when
+    // emailSent is false.
+    expect(res.body.activationUrl).toBeUndefined();
+    expect(sendWelcomeActivationEmailMock).toHaveBeenCalledWith(NEW_USER_EMAIL, 'NewUser', expect.any(String));
+
+    // No password works yet — the account only has an unguessable, never-revealed one.
+    const blockedLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: NEW_USER_EMAIL, password: 'guessed-password' });
+    expect(blockedLoginRes.status).toBe(401);
+
+    const rawToken = sendWelcomeActivationEmailMock.mock.calls[0][2];
+    const activateRes = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token: rawToken, newPassword: 'myOwnNewPassword123' });
+    expect(activateRes.status).toBe(200);
 
     const loginRes = await request(app)
       .post('/api/auth/login')
-      .send({ email: NEW_USER_EMAIL, password: res.body.temporaryPassword });
+      .send({ email: NEW_USER_EMAIL, password: 'myOwnNewPassword123' });
     expect(loginRes.status).toBe(200);
   });
 

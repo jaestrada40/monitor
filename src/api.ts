@@ -102,7 +102,7 @@ export const api = {
   admin: {
     listUsers: () => request<{ users: AdminUser[] }>('/admin/users'),
     createUser: (data: { email: string; username: string; role: UserRole }) =>
-      request<{ user: AdminUser; temporaryPassword: string; emailSent: boolean }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
+      request<{ user: AdminUser; activationUrl?: string; emailSent: boolean }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
     updateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) =>
       request<{ user: AdminUser }>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     removeUser: (id: string) => request<{ ok: true }>(`/admin/users/${id}`, { method: 'DELETE' }),

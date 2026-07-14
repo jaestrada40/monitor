@@ -149,9 +149,9 @@ export default function App() {
   };
 
   const handleAddUser = async (data: { email: string; username: string; role: UserRole }) => {
-    const { user: newUser, temporaryPassword, emailSent } = await api.admin.createUser(data);
+    const { user: newUser, activationUrl, emailSent } = await api.admin.createUser(data);
     setAdminUsers([...adminUsers, newUser]);
-    return { temporaryPassword, emailSent };
+    return { activationUrl, emailSent };
   };
 
   const handleUpdateUser = async (id: string, data: Partial<{ username: string; role: UserRole }>) => {

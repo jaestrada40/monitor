@@ -28,7 +28,7 @@ interface SettingsViewProps {
   settings: WorkspaceSettings;
   onSaveSettings: (settings: WorkspaceSettings) => void;
   users: AdminUser[];
-  onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ temporaryPassword: string; emailSent: boolean }>;
+  onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ activationUrl?: string; emailSent: boolean }>;
   onUpdateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) => Promise<void>;
   onRemoveUser: (id: string) => Promise<void>;
   onResetUserMfa: (id: string) => Promise<void>;
@@ -109,11 +109,11 @@ export default function SettingsView({
     }
 
     try {
-      const { temporaryPassword, emailSent } = await onAddUser({ email: newMemberEmail, username: newMemberName, role: newMemberRole });
+      const { activationUrl, emailSent } = await onAddUser({ email: newMemberEmail, username: newMemberName, role: newMemberRole });
       showToast(
         emailSent
-          ? `Usuario creado. Se envió un correo de bienvenida a ${newMemberEmail} con su contraseña temporal.`
-          : `Usuario creado, pero no se pudo enviar el correo de bienvenida (SMTP no configurado). Contraseña temporal: ${temporaryPassword}`,
+          ? `Usuario creado. Se envió un correo de bienvenida a ${newMemberEmail} con su enlace de activación.`
+          : `Usuario creado, pero no se pudo enviar el correo de bienvenida (SMTP no configurado). Enlace de activación (válido 1 hora): ${activationUrl}`,
         emailSent ? 'success' : 'info'
       );
       setNewMemberName('');
