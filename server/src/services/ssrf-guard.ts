@@ -113,6 +113,27 @@ export async function assertSafeUrl(rawUrl: string): Promise<void> {
   }
 }
 
+// Resolves a hostname and returns the first address that isn't blocked — shared by
+// createPinnedLookup (for http/tls's `lookup` option) and the browser proxy (for raw
+// CONNECT tunneling), so both funnel through the exact same validated resolution.
+export function pinnedResolve(hostname: string): Promise<{ address: string; family: number }> {
+  return new Promise((resolve, reject) => {
+    dnsCallback.lookup(hostname, { all: true }, (err, addresses) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const list = addresses as dnsCallback.LookupAddress[];
+      const safe = list.find((a) => !isBlockedIp(a.address));
+      if (!safe) {
+        reject(new UnsafeUrlError('blocked_address'));
+        return;
+      }
+      resolve(safe);
+    });
+  });
+}
+
 // Passed as the `lookup` option to http(s)/tls connect calls below. Critically, the
 // address this returns is the *exact* address the socket then connects to — there's no
 // second DNS resolution afterward, so a DNS-rebinding attacker can't have this call
@@ -120,22 +141,14 @@ export async function assertSafeUrl(rawUrl: string): Promise<void> {
 // This is what actually closes the TOCTOU gap; assertSafeUrl above is only a fast
 // early-rejection pass with a clearer error, not the real guarantee.
 export function createPinnedLookup() {
-  return (hostname: string, options: dnsCallback.LookupOneOptions, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
-    dnsCallback.lookup(hostname, { all: true }, (err, addresses) => {
-      if (err) {
-        callback(err, '', 4);
-        return;
-      }
-      const list = addresses as dnsCallback.LookupAddress[];
-      const safe = list.find((a) => !isBlockedIp(a.address));
-      if (!safe) {
-        callback(new UnsafeUrlError('blocked_address'), '', 4);
-        return;
-      }
-      callback(null, safe.address, safe.family);
-    });
+  return (hostname: string, _options: dnsCallback.LookupOneOptions, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
+    pinnedResolve(hostname)
+      .then((safe) => callback(null, safe.address, safe.family))
+      .catch((err) => callback(err, '', 4));
   };
 }
+
+export { isBlockedIp };
 
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;

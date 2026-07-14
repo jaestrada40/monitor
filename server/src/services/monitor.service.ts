@@ -3,6 +3,7 @@ import { chromium, type Browser } from 'playwright';
 import { sendIncidentEmail, sendSslExpiryEmail } from './email.service.js';
 import { checkSsl } from './ssl.service.js';
 import { assertSafeUrl, safeRequest } from './ssrf-guard.js';
+import { getBrowserProxyUrl } from './browserProxy.js';
 
 interface WebsiteCheckTarget {
   id: string;
@@ -69,7 +70,12 @@ let browserInstance: Browser | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (browserInstance && browserInstance.isConnected()) return browserInstance;
-  browserInstance = await chromium.launch({ headless: true });
+  // Routes every connection Chromium makes through our own pinned-DNS proxy (see
+  // browserProxy.ts) — Chromium does its own DNS resolution internally with no public API
+  // to pin it, so without this a DNS-rebinding response after the initial validation could
+  // still land the browser's actual connection on a private address.
+  const proxyUrl = await getBrowserProxyUrl();
+  browserInstance = await chromium.launch({ headless: true, proxy: { server: proxyUrl } });
   return browserInstance;
 }
 
@@ -82,10 +88,8 @@ async function browserCheck(url: string): Promise<{ ok: boolean; ms: number; sus
   try {
     const browser = await getBrowser();
     context = await browser.newContext({ userAgent: BROWSER_USER_AGENT });
-    // assertSafeUrl only validated the top-level URL — a malicious page could still try
-    // to make the browser itself issue requests (redirects, fetch/XHR, images) to an
-    // internal address once loaded. Every request this page context makes goes through
-    // the same check before being allowed to actually hit the network.
+    // Cheap early rejection in addition to the proxy above (scheme filtering, clearer
+    // abort semantics) — the proxy is what actually enforces the pinned-DNS guarantee.
     await context.route('**/*', async (route) => {
       const reqUrl = route.request().url();
       if (!reqUrl.startsWith('http:') && !reqUrl.startsWith('https:')) {
