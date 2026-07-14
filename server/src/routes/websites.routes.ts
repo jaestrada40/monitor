@@ -4,6 +4,19 @@ import { requireAuth } from '../middleware/requireAuth.js';
 import { computeUptimeStats } from '../services/uptime.service.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { assertSafeUrl } from '../services/ssrf-guard.js';
+import { isIntInRange } from '../validators.js';
+
+const MIN_CHECK_INTERVAL_SECONDS = 30;
+const MAX_CHECK_INTERVAL_SECONDS = 86_400; // 24h
+const MAX_TAGS = 20;
+const MAX_TAG_LENGTH = 40;
+
+function sanitizeTags(tags: unknown): string[] | null {
+  if (tags === undefined) return [];
+  if (!Array.isArray(tags) || tags.length > MAX_TAGS) return null;
+  const cleaned = tags.filter((t): t is string => typeof t === 'string' && t.length > 0 && t.length <= MAX_TAG_LENGTH);
+  return cleaned.length === tags.length ? cleaned : null;
+}
 
 export const websitesRouter = Router();
 websitesRouter.use(requireAuth);
@@ -56,7 +69,7 @@ websitesRouter.get('/latency-history', asyncHandler(async (req, res) => {
 
 websitesRouter.post('/', asyncHandler(async (req, res) => {
   const { name, url, checkInterval, tags } = req.body ?? {};
-  if (typeof name !== 'string' || !name.trim()) {
+  if (typeof name !== 'string' || !name.trim() || name.length > 200) {
     res.status(400).json({ error: 'invalid_name' });
     return;
   }
@@ -66,16 +79,29 @@ websitesRouter.post('/', asyncHandler(async (req, res) => {
     res.status(400).json({ error: 'invalid_url' });
     return;
   }
+  if (checkInterval !== undefined && !isIntInRange(checkInterval, MIN_CHECK_INTERVAL_SECONDS, MAX_CHECK_INTERVAL_SECONDS)) {
+    res.status(400).json({ error: 'invalid_check_interval' });
+    return;
+  }
+  const cleanTags = sanitizeTags(tags);
+  if (cleanTags === null) {
+    res.status(400).json({ error: 'invalid_tags' });
+    return;
+  }
   const result = await pool.query(
     `INSERT INTO websites (user_id, name, url, check_interval, tags)
      VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [req.userId, name, url, checkInterval || 60, JSON.stringify(tags || [])]
+    [req.userId, name, url, checkInterval || 60, JSON.stringify(cleanTags)]
   );
   res.status(201).json({ website: toWebsiteDto(result.rows[0], EMPTY_STATS) });
 }));
 
 websitesRouter.put('/:id', asyncHandler(async (req, res) => {
   const { name, url, checkInterval, tags } = req.body ?? {};
+  if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200)) {
+    res.status(400).json({ error: 'invalid_name' });
+    return;
+  }
   if (url !== undefined) {
     try {
       await assertSafeUrl(url);
@@ -84,11 +110,20 @@ websitesRouter.put('/:id', asyncHandler(async (req, res) => {
       return;
     }
   }
+  if (checkInterval !== undefined && !isIntInRange(checkInterval, MIN_CHECK_INTERVAL_SECONDS, MAX_CHECK_INTERVAL_SECONDS)) {
+    res.status(400).json({ error: 'invalid_check_interval' });
+    return;
+  }
+  const cleanTags = tags !== undefined ? sanitizeTags(tags) : [];
+  if (cleanTags === null) {
+    res.status(400).json({ error: 'invalid_tags' });
+    return;
+  }
   const result = await pool.query(
     `UPDATE websites SET name = COALESCE($1, name), url = COALESCE($2, url),
        check_interval = COALESCE($3, check_interval), tags = COALESCE($4, tags)
      WHERE id = $5 AND user_id = $6 RETURNING *`,
-    [name, url, checkInterval, tags ? JSON.stringify(tags) : null, req.params.id, req.userId]
+    [name, url, checkInterval, tags !== undefined ? JSON.stringify(cleanTags) : null, req.params.id, req.userId]
   );
   if (result.rows.length === 0) {
     res.status(404).json({ error: 'not_found' });

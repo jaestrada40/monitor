@@ -3,6 +3,8 @@ import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { sendTestEmail } from '../services/email.service.js';
+import { assertSafeUrl } from '../services/ssrf-guard.js';
+import { isOptionalString, isIntInRange, isValidPhone, isValidTelegramChatId } from '../validators.js';
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -40,8 +42,38 @@ settingsRouter.get('/notifications', asyncHandler(async (req, res) => {
 settingsRouter.put('/notifications', asyncHandler(async (req, res) => {
   const b = req.body ?? {};
   const emailAddresses = Array.isArray(b.emailAddresses)
-    ? b.emailAddresses.filter((e: unknown) => typeof e === 'string' && EMAIL_RE.test(e))
+    ? b.emailAddresses.filter((e: unknown) => typeof e === 'string' && EMAIL_RE.test(e)).slice(0, 20)
     : [];
+
+  if (!isOptionalString(b.slackWebhook, 2000)) {
+    res.status(400).json({ error: 'invalid_slack_webhook' });
+    return;
+  }
+  if (b.slackWebhook) {
+    try {
+      await assertSafeUrl(b.slackWebhook);
+    } catch {
+      res.status(400).json({ error: 'invalid_slack_webhook' });
+      return;
+    }
+  }
+  if (b.smsPhone && !isValidPhone(b.smsPhone)) {
+    res.status(400).json({ error: 'invalid_sms_phone' });
+    return;
+  }
+  if (b.telegramChatId && !isValidTelegramChatId(String(b.telegramChatId))) {
+    res.status(400).json({ error: 'invalid_telegram_chat_id' });
+    return;
+  }
+  if (!isIntInRange(b.thresholdResponseTime, 50, 60_000)) {
+    res.status(400).json({ error: 'invalid_threshold_response_time' });
+    return;
+  }
+  if (!isIntInRange(b.thresholdSslDays, 1, 90)) {
+    res.status(400).json({ error: 'invalid_threshold_ssl_days' });
+    return;
+  }
+
   const result = await pool.query(
     `UPDATE notification_settings SET
        email_enabled = $1, email_addresses = $2, slack_enabled = $3, slack_webhook = $4,
@@ -83,6 +115,14 @@ settingsRouter.get('/settings', asyncHandler(async (req, res) => {
 
 settingsRouter.put('/settings', asyncHandler(async (req, res) => {
   const b = req.body ?? {};
+  if (typeof b.companyName !== 'string' || !b.companyName.trim() || b.companyName.length > 200) {
+    res.status(400).json({ error: 'invalid_company_name' });
+    return;
+  }
+  if (typeof b.timezone !== 'string' || b.timezone.length > 100) {
+    res.status(400).json({ error: 'invalid_timezone' });
+    return;
+  }
   const result = await pool.query(
     `UPDATE workspace_settings SET company_name = $1, timezone = $2
      WHERE user_id = $3 RETURNING *`,
