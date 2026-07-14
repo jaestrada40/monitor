@@ -188,12 +188,17 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   if (!result.ok) {
     result = await pingOnce(website.url);
   }
+  console.log(
+    `[monitor] ${website.url} ping result: ok=${result.ok} statusCode=${result.statusCode ?? 'n/a'} ms=${result.ms}`
+  );
 
   // Full browser page loads take much longer than a plain HTTP ping, so their timing
   // isn't comparable to the latency threshold — track separately and skip that check below.
   let usedBrowserFallback = false;
   if (!result.ok && result.statusCode !== undefined && LIKELY_BOT_BLOCK_STATUS_CODES.has(result.statusCode)) {
+    console.log(`[monitor] ${website.url} got likely bot-block status ${result.statusCode}, retrying with headless browser...`);
     const browserResult = await browserCheck(website.url);
+    console.log(`[monitor] ${website.url} browser fallback result: ok=${browserResult.ok} ms=${browserResult.ms}`);
     if (browserResult.ok) {
       result = browserResult;
       usedBrowserFallback = true;
