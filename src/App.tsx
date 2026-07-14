@@ -85,7 +85,9 @@ export default function App() {
     setUser(null);
     setWebsites([]);
     setIncidents([]);
-    setCurrentView('login');
+    // Clear so a shared device doesn't land the next login on this session's last view.
+    localStorage.removeItem('monitorpro_current_view');
+    setCurrentView('dashboard');
   };
 
   const handleUpdateAvatar = async (avatarUrl: string) => {
