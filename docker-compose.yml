@@ -37,6 +37,16 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     entrypoint: ["sh", "-c", "node dist/migrate.js && node dist/index.js"]
+    # This container also runs Playwright/Chromium against user-registered URLs (the
+    # WAF-fallback and suspension-page checks) — caps runaway resource use from a hostile
+    # or heavy page, and no-new-privileges blocks privilege escalation via setuid binaries
+    # if Chromium's sandbox were ever compromised. A fully separate, unprivileged container
+    # for the browser checks would be stronger isolation still, but is a bigger
+    # architecture change (IPC/queue between services) than this warrants right now.
+    mem_limit: 1g
+    cpus: 1.5
+    security_opt:
+      - no-new-privileges:true
 
   frontend:
     build:
