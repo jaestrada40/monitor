@@ -33,6 +33,26 @@ app.use(cors({ origin: process.env.FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Defense-in-depth against CSRF beyond SameSite=Lax: a cross-site page can't forge the
+// Origin header a real browser sends (it isn't attacker-controlled like a Referer can be
+// via stripping), so reject a mismatch outright. A missing Origin is let through rather
+// than blocked — some legitimate same-origin requests omit it, and SameSite=Lax already
+// covers the classic cross-site form-POST case regardless.
+app.use((req, res, next) => {
+  if (!MUTATING_METHODS.has(req.method)) {
+    next();
+    return;
+  }
+  const origin = req.headers.origin;
+  if (origin && process.env.FRONTEND_ORIGIN && origin !== process.env.FRONTEND_ORIGIN) {
+    res.status(403).json({ error: 'origin_mismatch' });
+    return;
+  }
+  next();
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
