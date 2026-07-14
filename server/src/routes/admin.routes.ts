@@ -12,7 +12,14 @@ export const adminRouter = Router();
 const VALID_ROLES = ['super-admin', 'editor'];
 
 function toUserDto(row: any) {
-  return { id: row.id, email: row.email, username: row.username, avatarUrl: row.avatar_url, role: row.role };
+  return {
+    id: row.id,
+    email: row.email,
+    username: row.username,
+    avatarUrl: row.avatar_url,
+    role: row.role,
+    mfaEnabled: row.mfa_enabled,
+  };
 }
 
 adminRouter.use(requireAuth);
@@ -20,7 +27,7 @@ adminRouter.use(requireRole(['super-admin']));
 
 adminRouter.get('/', asyncHandler(async (_req, res) => {
   const result = await pool.query(
-    'SELECT id, email, username, avatar_url, role FROM users ORDER BY created_at ASC'
+    'SELECT id, email, username, avatar_url, role, mfa_enabled FROM users ORDER BY created_at ASC'
   );
   res.json({ users: result.rows.map(toUserDto) });
 }));
@@ -101,6 +108,22 @@ adminRouter.put('/:id', asyncHandler(async (req, res) => {
      WHERE id = $1
      RETURNING id, email, username, avatar_url, role`,
     [id, username ?? null, role ?? null]
+  );
+  if (result.rows.length === 0) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json({ user: toUserDto(result.rows[0]) });
+}));
+
+// Rescue path for a teammate locked out after losing their authenticator device/codes —
+// only a super-admin can do this, and only for someone else's account (if you're locked
+// out of your own MFA, you can't reach this endpoint since it requires an active session).
+adminRouter.post('/:id/mfa/disable', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const result = await pool.query(
+    'UPDATE users SET mfa_enabled = false, mfa_secret = NULL WHERE id = $1 RETURNING id, email, username, avatar_url, role',
+    [id]
   );
   if (result.rows.length === 0) {
     res.status(404).json({ error: 'not_found' });

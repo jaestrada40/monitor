@@ -31,6 +31,7 @@ interface SettingsViewProps {
   onAddUser: (data: { email: string; username: string; role: UserRole }) => Promise<{ temporaryPassword: string; emailSent: boolean }>;
   onUpdateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) => Promise<void>;
   onRemoveUser: (id: string) => Promise<void>;
+  onResetUserMfa: (id: string) => Promise<void>;
   currentUserId: string;
   user: UserSession;
   onMfaSetup: () => Promise<{ secret: string; qrCodeDataUrl: string }>;
@@ -40,7 +41,7 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({
-  settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, currentUserId,
+  settings, onSaveSettings, users, onAddUser, onUpdateUser, onRemoveUser, onResetUserMfa, currentUserId,
   user, onMfaSetup, onMfaVerifySetup, onMfaDisable, onChangePassword,
 }: SettingsViewProps) {
   const { showToast } = useToast();
@@ -151,6 +152,21 @@ export default function SettingsView({
       showToast('No se pudo actualizar el usuario. Inténtalo de nuevo.', 'error');
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const handleResetUserMfa = async (id: string) => {
+    const member = users.find(m => m.id === id);
+    const ok = await confirm(
+      `¿Restablecer la autenticación en dos pasos de ${member?.username}? Esto la desactiva por completo — deberá volver a configurarla desde su cuenta.`,
+      { danger: true, confirmLabel: 'Restablecer MFA' }
+    );
+    if (!ok) return;
+    try {
+      await onResetUserMfa(id);
+      showToast(`MFA de ${member?.username} restablecido.`, 'success');
+    } catch {
+      showToast('No se pudo restablecer el MFA de este usuario.', 'error');
     }
   };
 
@@ -389,6 +405,16 @@ export default function SettingsView({
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
+                          {mem.id !== currentUserId && mem.mfaEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => handleResetUserMfa(mem.id)}
+                              className="p-1 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer"
+                              title="Restablecer MFA (usuario perdió su código)"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {mem.id !== currentUserId && (
                             <button
                               type="button"

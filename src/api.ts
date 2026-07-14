@@ -20,6 +20,7 @@ export interface AdminUser {
   username: string;
   avatarUrl: string;
   role: UserRole;
+  mfaEnabled?: boolean;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -105,5 +106,6 @@ export const api = {
     updateUser: (id: string, data: Partial<{ username: string; role: UserRole }>) =>
       request<{ user: AdminUser }>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     removeUser: (id: string) => request<{ ok: true }>(`/admin/users/${id}`, { method: 'DELETE' }),
+    resetUserMfa: (id: string) => request<{ user: AdminUser }>(`/admin/users/${id}/mfa/disable`, { method: 'POST' }),
   },
 };

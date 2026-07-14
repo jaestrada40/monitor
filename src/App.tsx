@@ -168,6 +168,11 @@ export default function App() {
     setAdminUsers(adminUsers.filter((u) => u.id !== id));
   };
 
+  const handleResetUserMfa = async (id: string) => {
+    const { user: updated } = await api.admin.resetUserMfa(id);
+    setAdminUsers(adminUsers.map((u) => (u.id === id ? updated : u)));
+  };
+
   // Clear query and open add modal
   const handleQuickAddTrigger = () => {
     setCurrentView('inventory');
@@ -251,6 +256,7 @@ export default function App() {
             onAddUser={handleAddUser}
             onUpdateUser={handleUpdateUser}
             onRemoveUser={handleRemoveUser}
+            onResetUserMfa={handleResetUserMfa}
             currentUserId={user.id}
             user={user}
             onMfaSetup={api.auth.mfaSetup}
