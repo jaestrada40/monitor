@@ -26,6 +26,7 @@ services:
       PORT: 4000
       DATABASE_URL: postgres://monitorpro:${DB_PASSWORD}@db:5432/monitorpro
       JWT_SECRET: ${JWT_SECRET}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY}
       COOKIE_NAME: monitorpro_session
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       SMTP_HOST: ${SMTP_HOST}
