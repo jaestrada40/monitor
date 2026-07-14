@@ -1,4 +1,5 @@
 import tls from 'node:tls';
+import { createPinnedLookup } from './ssrf-guard.js';
 
 export interface SslCheckResult {
   status: 'valid' | 'expiring' | 'expired' | 'none';
@@ -45,6 +46,11 @@ export async function checkSsl(url: string, warnDays: number): Promise<SslCheckR
         // Node reject the connection before we can read it.
         rejectUnauthorized: false,
         timeout: 8000,
+        // Same pinned-lookup guard as the plain HTTP check (ssrf-guard.ts) — the caller
+        // (checkWebsite) already validated this URL, but pinning here too means the TLS
+        // socket connects to exactly the address that was validated, not a second,
+        // possibly-different DNS answer (rebinding).
+        lookup: createPinnedLookup() as unknown as typeof import('dns').lookup,
       },
       () => {
         const cert = socket.getPeerCertificate();

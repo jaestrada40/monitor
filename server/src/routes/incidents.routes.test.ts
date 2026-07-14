@@ -14,6 +14,12 @@ vi.mock('../services/ssl.service.js', () => ({
   checkSsl: vi.fn().mockResolvedValue({ status: 'none', expiryDays: 0, issuer: '' }),
 }));
 
+const safeRequestMock = vi.fn();
+vi.mock('../services/ssrf-guard.js', () => ({
+  assertSafeUrl: vi.fn().mockResolvedValue(undefined),
+  safeRequest: (...args: unknown[]) => safeRequestMock(...args),
+}));
+
 const flushBackgroundRecheck = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 async function createTestUser(email: string, username: string) {
@@ -78,7 +84,7 @@ describe('incidents routes', () => {
   });
 
   it('acknowledges then resolves an incident, computing duration', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    safeRequestMock.mockResolvedValue({ statusCode: 200, body: '' });
 
     const ackRes = await request(app).post(`/api/incidents/${incidentId}/acknowledge`).set('Cookie', cookie);
     expect(ackRes.status).toBe(200);
@@ -93,7 +99,7 @@ describe('incidents routes', () => {
     await flushBackgroundRecheck();
     const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
     expect(site.rows[0].status).toBe('up');
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('reopens a fresh incident immediately if the site is still broken when resolved', async () => {
@@ -104,7 +110,7 @@ describe('incidents routes', () => {
     );
     const brokenIncidentId = brokenIncident.rows[0].id;
 
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
+    safeRequestMock.mockRejectedValue(new Error('connection refused'));
 
     const resolveRes = await request(app).post(`/api/incidents/${brokenIncidentId}/resolve`).set('Cookie', cookie);
     expect(resolveRes.status).toBe(200);
@@ -120,7 +126,7 @@ describe('incidents routes', () => {
       [websiteId, brokenIncidentId]
     );
     expect(freshIncident.rows.length).toBe(1);
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('prevents cross-user access to another user\'s incident', async () => {

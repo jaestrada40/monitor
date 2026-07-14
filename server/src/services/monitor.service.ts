@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { chromium, type Browser } from 'playwright';
 import { sendIncidentEmail, sendSslExpiryEmail } from './email.service.js';
 import { checkSsl } from './ssl.service.js';
-import { assertSafeUrl } from './ssrf-guard.js';
+import { assertSafeUrl, safeRequest } from './ssrf-guard.js';
 
 interface WebsiteCheckTarget {
   id: string;
@@ -44,21 +44,22 @@ function containsSuspensionMarkers(bodyText: string): boolean {
 async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusCode?: number; suspended?: boolean }> {
   const start = Date.now();
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    const response = await fetch(url, {
-      signal: controller.signal,
+    // safeRequest (not fetch) — fetch follows redirects transparently, which would let a
+    // public site 302 this request to an internal address after the original URL already
+    // passed validation. Every hop here is re-validated and pinned to the address it
+    // actually connects to (see ssrf-guard.ts).
+    const response = await safeRequest(url, {
       headers: {
         'User-Agent': BROWSER_USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
+      timeoutMs: 10000,
     });
-    clearTimeout(timeout);
     // Cap how much we read — we only need enough of the page to catch a suspension
     // banner, not the whole document (which could be several MB on a heavy site).
-    const bodyText = typeof response.text === 'function' ? await response.text().catch(() => '') : '';
-    const suspended = containsSuspensionMarkers(bodyText.slice(0, 20_000));
-    return { ok: response.ok && !suspended, ms: Date.now() - start, statusCode: response.status, suspended };
+    const suspended = containsSuspensionMarkers(response.body.slice(0, 20_000));
+    const ok = response.statusCode >= 200 && response.statusCode < 300 && !suspended;
+    return { ok, ms: Date.now() - start, statusCode: response.statusCode, suspended };
   } catch {
     return { ok: false, ms: -1 };
   }

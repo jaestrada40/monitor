@@ -16,6 +16,15 @@ vi.mock('./email.service.js', () => ({
   sendSslExpiryEmail: (...args: unknown[]) => sendSslExpiryEmailMock(...args),
 }));
 
+// safeRequest replaced the raw fetch() call in pingOnce (see ssrf-guard.ts) to close the
+// redirect/DNS-rebinding SSRF gaps, so these tests mock it directly instead of stubbing
+// global fetch.
+const safeRequestMock = vi.fn();
+vi.mock('./ssrf-guard.js', () => ({
+  assertSafeUrl: vi.fn().mockResolvedValue(undefined),
+  safeRequest: (...args: unknown[]) => safeRequestMock(...args),
+}));
+
 describe('monitor.service', () => {
   let websiteId: string;
   let userId: string;
@@ -47,7 +56,7 @@ describe('monitor.service', () => {
   });
 
   it('records a successful check and keeps the site up', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    safeRequestMock.mockResolvedValue({ statusCode: 200, body: '' });
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
     const checks = await pool.query('SELECT value_ms FROM response_time_checks WHERE website_id = $1', [websiteId]);
@@ -56,11 +65,11 @@ describe('monitor.service', () => {
 
     const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
     expect(site.rows[0].status).toBe('up');
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('creates a critical incident, marks the site down, and emails all configured addresses', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
+    safeRequestMock.mockRejectedValue(new Error('connection refused'));
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
     const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
@@ -80,13 +89,13 @@ describe('monitor.service', () => {
     expect(sendIncidentEmailMock).toHaveBeenCalledWith(
       expect.objectContaining({ to: ['a@example.com', 'b@example.com'], kind: 'created', severity: 'critical' })
     );
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('creates a latency warning incident without sending an email', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise((resolve) => {
-      setTimeout(() => resolve({ ok: true, status: 200 }), 20);
-    })));
+    safeRequestMock.mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve({ statusCode: 200, body: '' }), 20);
+    }));
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 5, thresholdSslDays: 7 });
 
     const incidents = await pool.query(
@@ -96,7 +105,7 @@ describe('monitor.service', () => {
     expect(incidents.rows.length).toBe(1);
     expect(incidents.rows[0].severity).toBe('warning');
     expect(sendIncidentEmailMock).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('auto-resolves the active incident once the site recovers', async () => {
@@ -107,7 +116,7 @@ describe('monitor.service', () => {
     );
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [websiteId]);
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    safeRequestMock.mockResolvedValue({ statusCode: 200, body: '' });
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'down', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
     const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
@@ -122,12 +131,12 @@ describe('monitor.service', () => {
     expect(sendIncidentEmailMock).toHaveBeenCalledWith(
       expect.objectContaining({ to: ['a@example.com', 'b@example.com'], kind: 'resolved' })
     );
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('emails once when SSL first becomes expiring, then stays quiet on the next check', async () => {
     checkSslMock.mockResolvedValue({ status: 'expiring', expiryDays: 5, issuer: 'Let\'s Encrypt' });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    safeRequestMock.mockResolvedValue({ statusCode: 200, body: '' });
 
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
     expect(sendSslExpiryEmailMock).toHaveBeenCalledTimes(1);
@@ -137,12 +146,12 @@ describe('monitor.service', () => {
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
     expect(sendSslExpiryEmailMock).toHaveBeenCalledTimes(1);
 
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 
   it('re-alerts once the certificate goes from expiring to fully expired', async () => {
     checkSslMock.mockResolvedValue({ status: 'expiring', expiryDays: 5, issuer: '' });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    safeRequestMock.mockResolvedValue({ statusCode: 200, body: '' });
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
     expect(sendSslExpiryEmailMock).toHaveBeenCalledTimes(1);
 
@@ -151,6 +160,6 @@ describe('monitor.service', () => {
     expect(sendSslExpiryEmailMock).toHaveBeenCalledTimes(2);
     expect(sendSslExpiryEmailMock).toHaveBeenLastCalledWith(['a@example.com', 'b@example.com'], 'Monitor Test', 'expired', -1);
 
-    vi.unstubAllGlobals();
+    safeRequestMock.mockReset();
   });
 });

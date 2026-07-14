@@ -1,9 +1,23 @@
-import { describe, it, expect } from 'vitest';
-import { assertSafeUrl, UnsafeUrlError } from './ssrf-guard.js';
+import { describe, it, expect, vi } from 'vitest';
+
+// Stub DNS resolution so these tests are deterministic and don't depend on outbound
+// network/DNS access in CI — only assertSafeUrl's hostname-resolution branch needs this;
+// every other case here uses IP literals, which skip DNS lookup entirely.
+const lookupMock = vi.fn().mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+vi.mock('dns/promises', () => ({
+  default: { lookup: (...args: unknown[]) => lookupMock(...args) },
+}));
+
+const { assertSafeUrl, UnsafeUrlError } = await import('./ssrf-guard.js');
 
 describe('ssrf-guard', () => {
   it('allows a normal public HTTPS URL', async () => {
     await expect(assertSafeUrl('https://example.com')).resolves.toBeUndefined();
+  });
+
+  it('rejects a hostname that resolves to a private address (DNS rebinding)', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '10.0.0.5', family: 4 }]);
+    await expect(assertSafeUrl('https://rebind.example.com')).rejects.toThrow(UnsafeUrlError);
   });
 
   it('rejects non-HTTP(S) schemes', async () => {
