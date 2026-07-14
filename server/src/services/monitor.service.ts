@@ -211,6 +211,23 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
 
   await checkSslAndAlert(pool, website);
 
+  // A status code typical of WAF/bot-protection (not a real outage) that survived even the
+  // headless-browser retry — likely means the site is up but blocking this checker's IP
+  // specifically. Downgrade to a warning instead of a critical "down" alert to avoid paging
+  // anyone over a false positive we can't fix from our side (see checkWebsite tests/history).
+  const isLikelyWafBlock = !result.ok && result.statusCode !== undefined && LIKELY_BOT_BLOCK_STATUS_CODES.has(result.statusCode);
+
+  if (!result.ok && isLikelyWafBlock) {
+    await pool.query("UPDATE websites SET status = 'degraded' WHERE id = $1", [website.id]);
+    await createIncidentIfNeeded(
+      pool,
+      website.id,
+      'warning',
+      `El sitio respondió con código ${result.statusCode}, típico de protección WAF/anti-bot — verifica manualmente en un navegador antes de asumir que está caído.`
+    );
+    return;
+  }
+
   if (!result.ok) {
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);
     await createIncidentIfNeeded(pool, website.id, 'critical', 'El sitio no respondió tras dos intentos de conexión.');
