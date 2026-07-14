@@ -81,6 +81,23 @@ async function browserCheck(url: string): Promise<{ ok: boolean; ms: number; sus
   try {
     const browser = await getBrowser();
     context = await browser.newContext({ userAgent: BROWSER_USER_AGENT });
+    // assertSafeUrl only validated the top-level URL — a malicious page could still try
+    // to make the browser itself issue requests (redirects, fetch/XHR, images) to an
+    // internal address once loaded. Every request this page context makes goes through
+    // the same check before being allowed to actually hit the network.
+    await context.route('**/*', async (route) => {
+      const reqUrl = route.request().url();
+      if (!reqUrl.startsWith('http:') && !reqUrl.startsWith('https:')) {
+        await route.continue();
+        return;
+      }
+      try {
+        await assertSafeUrl(reqUrl);
+        await route.continue();
+      } catch {
+        await route.abort();
+      }
+    });
     const page = await context.newPage();
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     const bodyText = await page.content().catch(() => '');
