@@ -122,7 +122,9 @@ adminRouter.put('/:id', asyncHandler(async (req, res) => {
 adminRouter.post('/:id/mfa/disable', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const result = await pool.query(
-    'UPDATE users SET mfa_enabled = false, mfa_secret = NULL WHERE id = $1 RETURNING id, email, username, avatar_url, role',
+    // token_version + 1 forces any of this user's existing sessions to re-authenticate,
+    // in case the MFA loss scenario also involved a compromised session token.
+    'UPDATE users SET mfa_enabled = false, mfa_secret = NULL, token_version = token_version + 1 WHERE id = $1 RETURNING id, email, username, avatar_url, role',
     [id]
   );
   if (result.rows.length === 0) {

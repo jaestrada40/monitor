@@ -9,13 +9,13 @@ describe('auth.service', () => {
   });
 
   it('signs and verifies a JWT round-trip', () => {
-    const token = signToken('user-123');
+    const token = signToken('user-123', 0);
     const decoded = verifyToken(token);
     expect(decoded?.userId).toBe('user-123');
   });
 
   it('rejects a tampered token', () => {
-    const token = signToken('user-123');
+    const token = signToken('user-123', 0);
     expect(verifyToken(token + 'tampered')).toBeNull();
   });
 });

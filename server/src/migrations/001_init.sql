@@ -117,3 +117,8 @@ WHERE email_addresses = '[]'::jsonb AND email_address IS NOT NULL AND email_addr
 -- Tracks the last SSL status we alerted on per site, so we only email once per
 -- valid->expiring->expired transition instead of on every check.
 ALTER TABLE websites ADD COLUMN IF NOT EXISTS ssl_alerted_status TEXT NOT NULL DEFAULT '';
+
+-- Embedded in every issued JWT and checked on each request (see requireAuth) so a
+-- password change or MFA reset can invalidate every session token issued before it,
+-- instead of leaving already-issued tokens valid for their full 7-day lifetime.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;

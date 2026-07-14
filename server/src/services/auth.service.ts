@@ -19,14 +19,16 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
-export function signToken(userId: string): string {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '7d' });
+export function signToken(userId: string, tokenVersion: number): string {
+  return jwt.sign({ userId, tokenVersion }, JWT_SECRET, { expiresIn: '7d' });
 }
 
-export function verifyToken(token: string): { userId: string } | null {
+export function verifyToken(token: string): { userId: string; tokenVersion: number } | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-    return { userId: decoded.userId };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tokenVersion?: number };
+    // Tokens issued before token_version existed have no claim — treat as version 0 so
+    // they still validate against a freshly migrated column (which also defaults to 0).
+    return { userId: decoded.userId, tokenVersion: decoded.tokenVersion ?? 0 };
   } catch {
     return null;
   }

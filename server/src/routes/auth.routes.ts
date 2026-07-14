@@ -11,6 +11,7 @@ import {
 } from '../services/auth.service.js';
 import { sendPasswordResetEmail } from '../services/email.service.js';
 import { generateMfaSecret, verifyMfaToken, generateQrCodeDataUrl } from '../services/mfa.service.js';
+import { encryptSecret, decryptSecret } from '../services/encryption.service.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { loginLimiter, forgotPasswordLimiter, resetPasswordLimiter, mfaVerifyLimiter } from '../middleware/rateLimit.js';
@@ -42,7 +43,7 @@ function toUserDto(row: any) {
 authRouter.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { email, password } = req.body ?? {};
   const result = await pool.query(
-    'SELECT id, email, username, avatar_url, role, password_hash, mfa_enabled FROM users WHERE email = $1',
+    'SELECT id, email, username, avatar_url, role, password_hash, mfa_enabled, token_version FROM users WHERE email = $1',
     [email]
   );
   const user = result.rows[0];
@@ -56,7 +57,7 @@ authRouter.post('/login', loginLimiter, asyncHandler(async (req, res) => {
     return;
   }
 
-  const token = signToken(user.id);
+  const token = signToken(user.id, user.token_version);
   res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
   res.json({ user: toUserDto(user) });
 }));
@@ -75,16 +76,16 @@ authRouter.post('/login/mfa', mfaVerifyLimiter, asyncHandler(async (req, res) =>
   }
 
   const result = await pool.query(
-    'SELECT id, email, username, avatar_url, role, mfa_enabled, mfa_secret FROM users WHERE id = $1',
+    'SELECT id, email, username, avatar_url, role, mfa_enabled, mfa_secret, token_version FROM users WHERE id = $1',
     [pending.userId]
   );
   const user = result.rows[0];
-  if (!user || !user.mfa_enabled || !user.mfa_secret || !(await verifyMfaToken(user.mfa_secret, token))) {
+  if (!user || !user.mfa_enabled || !user.mfa_secret || !(await verifyMfaToken(decryptSecret(user.mfa_secret), token))) {
     res.status(401).json({ error: 'invalid_code' });
     return;
   }
 
-  const sessionToken = signToken(user.id);
+  const sessionToken = signToken(user.id, user.token_version);
   res.cookie(COOKIE_NAME, sessionToken, COOKIE_OPTS);
   res.json({ user: toUserDto(user) });
 }));
@@ -154,7 +155,9 @@ authRouter.post('/reset-password', resetPasswordLimiter, asyncHandler(async (req
 
   const passwordHash = await hashPassword(newPassword);
   await pool.query(
-    'UPDATE users SET password_hash = $1, reset_token_hash = NULL, reset_token_expires = NULL WHERE id = $2',
+    // Bumping token_version invalidates any session token issued before this reset —
+    // relevant if the reset was triggered because a token/password had already leaked.
+    'UPDATE users SET password_hash = $1, reset_token_hash = NULL, reset_token_expires = NULL, token_version = token_version + 1 WHERE id = $2',
     [passwordHash, result.rows[0].id]
   );
   res.json({ ok: true });
@@ -192,7 +195,15 @@ authRouter.put('/me/password', requireAuth, asyncHandler(async (req, res) => {
   }
 
   const passwordHash = await hashPassword(newPassword);
-  await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, req.userId]);
+  // Bump token_version to invalidate any other session token for this account (e.g. a
+  // stolen cookie), then immediately reissue a fresh one so the caller's own session
+  // making this request doesn't get logged out by its own action.
+  const updated = await pool.query(
+    'UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2 RETURNING token_version',
+    [passwordHash, req.userId]
+  );
+  const newToken = signToken(req.userId!, updated.rows[0].token_version);
+  res.cookie(COOKIE_NAME, newToken, COOKIE_OPTS);
   res.json({ ok: true });
 }));
 
@@ -203,7 +214,7 @@ authRouter.post('/mfa/setup', requireAuth, asyncHandler(async (req, res) => {
   const { secret, otpauthUrl } = generateMfaSecret(userResult.rows[0].email);
   // Stored but mfa_enabled stays false until verify-setup succeeds, so an abandoned
   // setup never locks the account out.
-  await pool.query('UPDATE users SET mfa_secret = $1 WHERE id = $2', [secret, req.userId]);
+  await pool.query('UPDATE users SET mfa_secret = $1 WHERE id = $2', [encryptSecret(secret), req.userId]);
   const qrCodeDataUrl = await generateQrCodeDataUrl(otpauthUrl);
   res.json({ secret, qrCodeDataUrl });
 }));
@@ -215,7 +226,8 @@ authRouter.post('/mfa/verify-setup', requireAuth, mfaVerifyLimiter, asyncHandler
     return;
   }
   const result = await pool.query('SELECT mfa_secret FROM users WHERE id = $1', [req.userId]);
-  const secret = result.rows[0]?.mfa_secret;
+  const encryptedSecret = result.rows[0]?.mfa_secret;
+  const secret = encryptedSecret ? decryptSecret(encryptedSecret) : null;
   if (!secret || !(await verifyMfaToken(secret, token))) {
     res.status(401).json({ error: 'invalid_code' });
     return;
@@ -232,10 +244,15 @@ authRouter.post('/mfa/disable', requireAuth, mfaVerifyLimiter, asyncHandler(asyn
   }
   const result = await pool.query('SELECT mfa_secret, mfa_enabled FROM users WHERE id = $1', [req.userId]);
   const row = result.rows[0];
-  if (!row?.mfa_enabled || !row.mfa_secret || !(await verifyMfaToken(row.mfa_secret, token))) {
+  if (!row?.mfa_enabled || !row.mfa_secret || !(await verifyMfaToken(decryptSecret(row.mfa_secret), token))) {
     res.status(401).json({ error: 'invalid_code' });
     return;
   }
-  await pool.query("UPDATE users SET mfa_enabled = false, mfa_secret = NULL WHERE id = $1", [req.userId]);
+  const updated = await pool.query(
+    'UPDATE users SET mfa_enabled = false, mfa_secret = NULL, token_version = token_version + 1 WHERE id = $1 RETURNING token_version',
+    [req.userId]
+  );
+  const newToken = signToken(req.userId!, updated.rows[0].token_version);
+  res.cookie(COOKIE_NAME, newToken, COOKIE_OPTS);
   res.json({ ok: true });
 }));
