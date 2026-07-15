@@ -9,13 +9,15 @@ import {
   Clock,
   ShieldCheck,
   ShieldAlert,
-  Plus
+  Plus,
+  Menu
 } from 'lucide-react';
 import { UserSession } from '../types';
 
 interface TopNavBarProps {
   user: UserSession | null;
   onQuickAdd: () => void;
+  onOpenSidebar: () => void;
   totalWebsites?: number;
   upWebsites?: number;
   criticalIncidents?: number;
@@ -25,6 +27,7 @@ interface TopNavBarProps {
 export default function TopNavBar({
   user,
   onQuickAdd,
+  onOpenSidebar,
   totalWebsites = 0,
   upWebsites = 0,
   criticalIncidents = 0,
@@ -49,8 +52,17 @@ export default function TopNavBar({
   return (
     <header
       id="main-topbar"
-      className="h-16 border-b border-slate-200 bg-white fixed top-0 right-0 left-64 flex items-center px-6 z-20 shadow-xs"
+      className="h-16 border-b border-slate-200 bg-white fixed top-0 right-0 left-0 lg:left-64 flex items-center px-4 lg:px-6 gap-3 z-20 shadow-xs"
     >
+      <button
+        id="btn-open-sidebar"
+        onClick={onOpenSidebar}
+        aria-label="Abrir menú de navegación"
+        className="lg:hidden p-2 -ml-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors cursor-pointer"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       {/* DevOps Clocks & Probe Live status */}
       <div className="flex items-center gap-6 ml-auto">
         {/* System Health Summary */}
@@ -83,7 +95,7 @@ export default function TopNavBar({
         </div>
 
         {/* Timestamps (Local & UTC) */}
-        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-3 py-1 rounded-lg">
+        <div className="hidden sm:flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-3 py-1 rounded-lg">
           <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium font-mono">
             <Clock className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-400">LOC:</span>

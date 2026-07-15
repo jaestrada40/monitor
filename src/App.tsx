@@ -40,6 +40,7 @@ export default function App() {
   const [latencyHistory, setLatencyHistory] = useState<{ timestamp: string; value: number }[]>([]);
   const [currentView, setCurrentView] = usePersistentState<ViewType>('current_view', 'dashboard');
   const [selectedWebsiteId, setSelectedWebsiteId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('resetToken'));
   const [resetTokenConsumed, setResetTokenConsumed] = useState(false);
@@ -325,13 +326,16 @@ export default function App() {
         onLogout={handleLogout}
         onUpdateAvatar={handleUpdateAvatar}
         incidents={incidents}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       {/* Main Page Area Container */}
-      <div className="flex-1 pl-64 min-w-0">
+      <div className="flex-1 lg:pl-64 min-w-0">
         <TopNavBar
           user={user}
           onQuickAdd={handleQuickAddTrigger}
+          onOpenSidebar={() => setSidebarOpen(true)}
           totalWebsites={websites.length}
           upWebsites={websites.filter((w) => w.status === 'up').length}
           criticalIncidents={incidents.filter((i) => i.status !== 'resolved' && i.severity === 'critical').length}
@@ -339,7 +343,7 @@ export default function App() {
         />
 
         {/* Scrolling body offset for fixed top nav (16px bottom padding for bento look) */}
-        <main className="pt-22 pb-12 px-8 max-w-7xl mx-auto">
+        <main className="pt-22 pb-12 px-4 sm:px-8 max-w-7xl mx-auto">
           {renderView()}
         </main>
       </div>

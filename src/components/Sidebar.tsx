@@ -25,9 +25,11 @@ interface SidebarProps {
   onLogout: () => void;
   onUpdateAvatar: (avatarUrl: string) => Promise<void>;
   incidents: Incident[];
+  isOpen: boolean;
+  onClose: () => void;
 }
 
-export default function Sidebar({ currentView, onNavigate, user, onLogout, onUpdateAvatar, incidents }: SidebarProps) {
+export default function Sidebar({ currentView, onNavigate, user, onLogout, onUpdateAvatar, incidents, isOpen, onClose }: SidebarProps) {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const { showToast } = useToast();
@@ -68,10 +70,22 @@ export default function Sidebar({ currentView, onNavigate, user, onLogout, onUpd
   ];
 
   return (
-    <aside 
-      id="main-sidebar"
-      className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between h-screen fixed left-0 top-0 text-slate-300 z-30"
-    >
+    <>
+      {/* Mobile overlay, closes the drawer when tapped outside it */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-slate-950/60 z-30 lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        id="main-sidebar"
+        className={`w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between h-screen fixed left-0 top-0 text-slate-300 z-40 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
       {/* Brand Header */}
       <div>
         <div className="h-16 flex items-center px-6 border-b border-slate-800 gap-2.5">
@@ -93,7 +107,10 @@ export default function Sidebar({ currentView, onNavigate, user, onLogout, onUpd
               <button
                 key={item.id}
                 id={`nav-item-${item.id}`}
-                onClick={() => onNavigate(item.id as ViewType)}
+                onClick={() => {
+                  onNavigate(item.id as ViewType);
+                  onClose();
+                }}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 group ${
                   isActive 
                     ? 'bg-indigo-600 text-white shadow-sm' 
@@ -167,5 +184,6 @@ export default function Sidebar({ currentView, onNavigate, user, onLogout, onUpd
         </button>
       </div>
     </aside>
+    </>
   );
 }

@@ -35,8 +35,8 @@ const PAGE_SIZE = 10;
 
 interface InventoryViewProps {
   websites: Website[];
-  onAddWebsite: (website: Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>) => void;
-  onEditWebsite: (website: Pick<Website, 'id' | 'name' | 'url' | 'checkInterval' | 'tags'>) => void;
+  onAddWebsite: (website: Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>) => Promise<void>;
+  onEditWebsite: (website: Pick<Website, 'id' | 'name' | 'url' | 'checkInterval' | 'tags'>) => Promise<void>;
   onDeleteWebsite: (id: string) => void;
   onToggleStatus: (id: string) => void; // toggle between Up/Maintenance
   onNavigateToDetails: (id: string) => void;
@@ -97,19 +97,24 @@ export default function InventoryView({
 
   const pagedWebsites = filteredWebsites.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const handleSubmitAdd = (e: React.FormEvent) => {
+  const handleSubmitAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSiteName || !newSiteUrl) {
       showToast('Por favor, rellena el nombre y la dirección URL.', 'error');
       return;
     }
-    
-    onAddWebsite({
-      name: newSiteName,
-      url: newSiteUrl,
-      checkInterval: Number(newSiteInterval),
-      tags: newSiteTags.split(',').map(t => t.trim()).filter(Boolean)
-    });
+
+    try {
+      await onAddWebsite({
+        name: newSiteName,
+        url: newSiteUrl,
+        checkInterval: Number(newSiteInterval),
+        tags: newSiteTags.split(',').map(t => t.trim()).filter(Boolean)
+      });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo guardar el sitio.', 'error');
+      return;
+    }
 
     // Reset and close
     setNewSiteName('');
@@ -123,11 +128,14 @@ export default function InventoryView({
     setEditingSite(web);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingSite) {
-      onEditWebsite(editingSite);
+    if (!editingSite) return;
+    try {
+      await onEditWebsite(editingSite);
       setEditingSite(null);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo guardar el sitio.', 'error');
     }
   };
 

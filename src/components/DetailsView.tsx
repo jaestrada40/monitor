@@ -31,6 +31,21 @@ interface DetailsViewProps {
   onResolveIncident: (id: string) => void;
 }
 
+function formatRelativeTime(isoTimestamp: string): string {
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return 'justo ahora';
+
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return 'justo ahora';
+  if (diffMinutes < 60) return `Hace ${diffMinutes} min`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `Hace ${diffHours} hora${diffHours !== 1 ? 's' : ''}`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `Hace ${diffDays} día${diffDays !== 1 ? 's' : ''}`;
+}
+
 export default function DetailsView({
   website,
   incidents,
@@ -64,6 +79,18 @@ export default function DetailsView({
   const areaString = history.length > 0
     ? `${paddingX},${height - paddingY} ` + pointsString + ` ${width - paddingX},${height - paddingY}`
     : '';
+
+  // Real latency stats derived from the same 24h history (no synthetic per-region data)
+  const upSamples = history.filter(h => h.value > 0);
+  const avgLatency = upSamples.length > 0
+    ? Math.round(upSamples.reduce((acc, h) => acc + h.value, 0) / upSamples.length)
+    : 0;
+  const peakLatency = upSamples.length > 0 ? Math.max(...upSamples.map(h => h.value)) : 0;
+  const lowestLatency = upSamples.length > 0 ? Math.min(...upSamples.map(h => h.value)) : 0;
+  const downSamples = history.length - upSamples.length;
+  const sampleAvailability = history.length > 0
+    ? Number((((history.length - downSamples) / history.length) * 100).toFixed(2))
+    : 100;
 
   return (
     <div className="space-y-6">
@@ -114,7 +141,7 @@ export default function DetailsView({
               </>
             )}
           </div>
-          <span className="text-[11px] text-slate-400 block mt-2 font-mono">Última comprobación: justo ahora</span>
+          <span className="text-[11px] text-slate-400 block mt-2 font-mono">Última comprobación: {formatRelativeTime(website.lastChecked)}</span>
         </div>
 
         {/* Latency card */}
@@ -126,7 +153,7 @@ export default function DetailsView({
             </span>
             <span className="text-sm text-slate-500 font-semibold font-mono">ms</span>
           </div>
-          <span className="text-[11px] text-slate-400 block mt-1">Sonda local recomendada: 112ms</span>
+          <span className="text-[11px] text-slate-400 block mt-1">Promedio 24h: {avgLatency > 0 ? `${avgLatency}ms` : 'sin datos'}</span>
         </div>
 
         {/* Uptime card */}
@@ -146,7 +173,7 @@ export default function DetailsView({
           <div className="mt-2 flex items-baseline gap-1">
             <span className="text-3xl font-mono font-bold text-indigo-600">{website.checkInterval}s</span>
           </div>
-          <span className="text-[11px] text-slate-400 block mt-1">Sondas redundantes activas: 3</span>
+          <span className="text-[11px] text-slate-400 block mt-1">Basado en {history.length} muestra{history.length !== 1 ? 's' : ''} de 24h</span>
         </div>
 
       </div>
@@ -233,51 +260,43 @@ export default function DetailsView({
             )}
           </div>
 
-          {/* Locations distribution card */}
+          {/* Latency stats card (derived from the real 24h history, no synthetic per-region probes) */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-2xs p-5">
-            <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">Latencia por Sonda de Monitoreo</h3>
-            
-            <div className="space-y-4">
-              {[
-                { name: 'US-East (Virginia)', code: 'us-east-1', baseTime: Math.round(website.responseTime * 0.95), okRate: 100 },
-                { name: 'EU-West (Frankfurt)', code: 'eu-central-1', baseTime: Math.round(website.responseTime * 1.08), okRate: 99.98 },
-                { name: 'AP-South (Singapur)', code: 'ap-southeast-1', baseTime: Math.round(website.responseTime * 1.45), okRate: 99.92 }
-              ].map((loc) => {
-                const latencyVal = website.status === 'down' ? 0 : loc.baseTime;
-                const ratio = Math.min(100, Math.round((latencyVal / 600) * 100));
-                
-                return (
-                  <div key={loc.code} className="text-xs space-y-1.5">
-                    <div className="flex justify-between font-semibold">
-                      <div className="flex items-center gap-1.5 text-slate-700">
-                        <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                        <span>{loc.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono font-medium">({loc.code})</span>
-                      </div>
-                      <div className="font-mono flex items-center gap-2">
-                        <span className="text-slate-900 font-bold">{latencyVal > 0 ? `${latencyVal}ms` : 'Error / Timeout'}</span>
-                        <span className="text-slate-400">|</span>
-                        <span className="text-emerald-600 font-bold">{loc.okRate}% Éxito</span>
-                      </div>
-                    </div>
+            <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">Estadísticas de Latencia (24h)</h3>
 
-                    {/* Progress ping bar */}
-                    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex">
-                      <div 
-                        style={{ width: `${website.status === 'down' ? 0 : Math.max(5, ratio)}%` }} 
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          website.status === 'down' 
-                            ? 'bg-rose-500' 
-                            : latencyVal > 350 
-                            ? 'bg-amber-500' 
-                            : 'bg-indigo-600'
-                        }`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {history.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400">Ningún dato disponible en las últimas 24 horas.</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Promedio</span>
+                  <div className="text-lg font-bold font-mono text-slate-800 mt-0.5">{avgLatency > 0 ? `${avgLatency}ms` : '--'}</div>
+                </div>
+                <div className="bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Disponibilidad de muestras</span>
+                  <div className="text-lg font-bold font-mono text-slate-800 mt-0.5">{sampleAvailability}%</div>
+                </div>
+                <div className="bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-emerald-500" /> Mínima
+                  </span>
+                  <div className="text-lg font-bold font-mono text-emerald-600 mt-0.5">{lowestLatency > 0 ? `${lowestLatency}ms` : '--'}</div>
+                </div>
+                <div className="bg-slate-50/60 p-3 rounded-lg border border-slate-100">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-rose-500" /> Pico
+                  </span>
+                  <div className="text-lg font-bold font-mono text-rose-600 mt-0.5">{peakLatency > 0 ? `${peakLatency}ms` : '--'}</div>
+                </div>
+              </div>
+            )}
+
+            {downSamples > 0 && (
+              <p className="text-[11px] text-slate-400 font-medium mt-3 flex items-center gap-1.5">
+                <MapPin className="w-3 h-3 text-slate-300 shrink-0" />
+                {downSamples} de {history.length} muestras registraron caída (0ms) en las últimas 24h.
+              </p>
+            )}
           </div>
 
         </div>
@@ -377,7 +396,7 @@ export default function DetailsView({
                       <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                       <div className="space-y-0.5">
                         <div className="font-bold text-slate-900 leading-snug">{inc.title}</div>
-                        <span className="text-[10px] font-mono font-semibold text-slate-400">Abierto: Hace 4 horas</span>
+                        <span className="text-[10px] font-mono font-semibold text-slate-400">Abierto: {formatRelativeTime(inc.createdAt)}</span>
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-600 font-medium leading-relaxed">{inc.description}</p>
