@@ -213,6 +213,18 @@ export default function App() {
           />
         );
       case 'details':
+        if (!selectedWebsite) {
+          return (
+            <InventoryView
+              websites={websites}
+              onAddWebsite={handleAddWebsite}
+              onEditWebsite={handleEditWebsite}
+              onDeleteWebsite={handleDeleteWebsite}
+              onToggleStatus={handleToggleStatus}
+              onNavigateToDetails={(id) => handleNavigateToView('details', id)}
+            />
+          );
+        }
         return (
           <DetailsView
             website={selectedWebsite}
