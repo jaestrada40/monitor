@@ -61,8 +61,9 @@ export default function DetailsView({
 
   // Build the detailed response chart values
   const history = website.responseTimeHistory || [];
+  const upValues = history.filter(h => h.value > 0).map(h => h.value);
   const maxVal = history.length > 0 ? Math.max(...history.map(h => h.value)) : 200;
-  const minVal = history.length > 0 ? Math.min(...history.filter(h => h.value > 0).map(h => h.value)) : 50;
+  const minVal = upValues.length > 0 ? Math.min(...upValues) : 0;
 
   // Render responsive coordinates for custom detailed SVG
   const width = 800;

@@ -25,6 +25,29 @@ export interface AdminUser {
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
+// Maps backend error codes to clear, professional messages for the UI. Codes not listed
+// here fall back to a prettified version of the raw code (underscores → spaces, capitalized)
+// so the user never sees a raw snake_case token.
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid_url: 'La dirección URL no es válida. Verifica que el formato sea correcto, por ejemplo https://ejemplo.com.',
+  unsupported_scheme: 'La URL debe comenzar con http:// o https://.',
+  blocked_address: 'Esa dirección apunta a una red privada o reservada y no puede monitorearse por motivos de seguridad.',
+  dns_resolution_failed: 'No se pudo resolver el dominio. Verifica que la URL esté escrita correctamente.',
+  too_many_redirects: 'El sitio tiene demasiadas redirecciones y no pudo verificarse.',
+  invalid_redirect_location: 'El sitio redirige a una dirección inválida.',
+  invalid_name: 'El nombre del sitio no es válido.',
+  invalid_check_interval: 'El intervalo de comprobación no es válido.',
+  invalid_tags: 'Las etiquetas ingresadas no son válidas.',
+  not_found: 'No se encontró el recurso solicitado.',
+};
+
+function humanizeErrorCode(code: string): string {
+  if (ERROR_MESSAGES[code]) return ERROR_MESSAGES[code];
+  if (!/^[a-z0-9_]+$/.test(code)) return code;
+  const words = code.split('_');
+  return words[0].charAt(0).toUpperCase() + words[0].slice(1) + (words.length > 1 ? ' ' + words.slice(1).join(' ') : '') + '.';
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
@@ -33,7 +56,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    throw new Error(body.error ? humanizeErrorCode(body.error) : `Request failed: ${res.status}`);
   }
   return res.json();
 }

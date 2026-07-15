@@ -3,7 +3,7 @@ import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { computeUptimeStats } from '../services/uptime.service.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { assertSafeUrl } from '../services/ssrf-guard.js';
+import { assertSafeUrl, UnsafeUrlError } from '../services/ssrf-guard.js';
 import { isIntInRange } from '../validators.js';
 
 const MIN_CHECK_INTERVAL_SECONDS = 30;
@@ -75,8 +75,8 @@ websitesRouter.post('/', asyncHandler(async (req, res) => {
   }
   try {
     await assertSafeUrl(url);
-  } catch {
-    res.status(400).json({ error: 'invalid_url' });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof UnsafeUrlError ? err.message : 'invalid_url' });
     return;
   }
   if (checkInterval !== undefined && !isIntInRange(checkInterval, MIN_CHECK_INTERVAL_SECONDS, MAX_CHECK_INTERVAL_SECONDS)) {
@@ -105,8 +105,8 @@ websitesRouter.put('/:id', asyncHandler(async (req, res) => {
   if (url !== undefined) {
     try {
       await assertSafeUrl(url);
-    } catch {
-      res.status(400).json({ error: 'invalid_url' });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof UnsafeUrlError ? err.message : 'invalid_url' });
       return;
     }
   }
