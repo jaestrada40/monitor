@@ -129,6 +129,12 @@ export default function DetailsView({
                 <span className="text-lg font-bold text-amber-700">DEGRADADO</span>
               </>
             )}
+            {website.status === 'protected' && (
+              <>
+                <ShieldAlert className="w-4 h-4 text-sky-600 shrink-0" />
+                <span className="text-lg font-bold text-sky-700">PROTEGIDO</span>
+              </>
+            )}
             {website.status === 'maintenance' && (
               <>
                 <span className="w-3.5 h-3.5 rounded-full bg-slate-400 shrink-0"></span>
@@ -143,6 +149,9 @@ export default function DetailsView({
             )}
           </div>
           <span className="text-[11px] text-slate-400 block mt-2 font-mono">Última comprobación: {formatRelativeTime(website.lastChecked)}</span>
+          {website.status === 'protected' && (
+            <span className="text-[11px] text-sky-700 block mt-2 leading-snug">Cloudflare responde, pero bloquea la validación del contenido.</span>
+          )}
         </div>
 
         {/* Latency card */}

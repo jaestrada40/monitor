@@ -12,7 +12,8 @@ import {
   AlertCircle,
   Clock,
   Bell,
-  ChevronRight
+  ChevronRight,
+  ShieldAlert
 } from 'lucide-react';
 import { Website, Incident, NotificationSettings } from '../types';
 
@@ -425,11 +426,16 @@ export default function DashboardView({
                         <span className="w-1 h-1 rounded-full bg-emerald-500"></span> Up
                       </span>
                     )}
-                    {web.status === 'degraded' && (
+                  {web.status === 'degraded' && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 border border-amber-200 text-amber-700 uppercase">
                         <span className="w-1 h-1 rounded-full bg-amber-500"></span> Degradado
                       </span>
-                    )}
+                  )}
+                  {web.status === 'protected' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 border border-sky-200 text-sky-700 uppercase" title="Cloudflare responde, pero el contenido no puede verificarse">
+                      <ShieldAlert className="w-3 h-3" /> Protegido
+                    </span>
+                  )}
                     {web.status === 'maintenance' && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 border border-slate-200 text-slate-600 uppercase">
                         <span className="w-1 h-1 rounded-full bg-slate-400"></span> Mantenimiento

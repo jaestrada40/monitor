@@ -55,7 +55,7 @@ export default function InventoryView({
 
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'up' | 'down' | 'degraded' | 'maintenance'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | Website['status']>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [page, setPage] = useState(1);
@@ -176,7 +176,7 @@ export default function InventoryView({
 
           {/* Status Filter buttons */}
           <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 text-xs">
-            {(['all', 'up', 'down', 'degraded', 'maintenance'] as const).map((status) => (
+            {(['all', 'up', 'down', 'degraded', 'protected', 'maintenance'] as const).map((status) => (
               <button
                 key={status}
                 onClick={() => setStatusFilter(status)}
@@ -186,7 +186,7 @@ export default function InventoryView({
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                {status === 'all' ? 'Todos' : status}
+                {status === 'all' ? 'Todos' : status === 'protected' ? 'Protegidos' : status}
               </button>
             ))}
           </div>
@@ -264,6 +264,11 @@ export default function InventoryView({
                   {web.status === 'degraded' && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 border border-amber-100 text-amber-700 uppercase">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Deg
+                    </span>
+                  )}
+                  {web.status === 'protected' && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 border border-sky-200 text-sky-700 uppercase" title="Cloudflare responde, pero impide validar el contenido del portal">
+                      <ShieldAlert className="w-3 h-3" /> Protegido
                     </span>
                   )}
                   {web.status === 'maintenance' && (
@@ -452,6 +457,11 @@ export default function InventoryView({
                       {web.status === 'degraded' && (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 border border-amber-100 text-amber-700 uppercase">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Deg
+                        </span>
+                      )}
+                      {web.status === 'protected' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 border border-sky-200 text-sky-700 uppercase" title="Cloudflare responde, pero impide validar el contenido del portal">
+                          <ShieldAlert className="w-3 h-3" /> Protegido
                         </span>
                       )}
                       {web.status === 'maintenance' && (
