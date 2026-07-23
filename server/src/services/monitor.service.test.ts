@@ -68,6 +68,37 @@ describe('monitor.service', () => {
     safeRequestMock.mockReset();
   });
 
+  it('marks the known MINFIN Cloudflare block as protected without reducing uptime or opening an incident', async () => {
+    safeRequestMock.mockResolvedValue({
+      statusCode: 403,
+      headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' },
+      body: '<title>¡No disponible!</title><p>Sitio no permitido</p>',
+    });
+
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
+
+    const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('protected');
+    const checks = await pool.query('SELECT value_ms FROM response_time_checks WHERE website_id = $1', [websiteId]);
+    expect(checks.rows).toHaveLength(0);
+    const incidents = await pool.query('SELECT id FROM incidents WHERE website_id = $1', [websiteId]);
+    expect(incidents.rows).toHaveLength(0);
+    safeRequestMock.mockReset();
+  });
+
+  it('treats a Cloudflare origin 522 as a critical outage', async () => {
+    safeRequestMock.mockResolvedValue({ statusCode: 522, headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' }, body: '' });
+
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
+
+    const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('down');
+    const incidents = await pool.query('SELECT severity, description FROM incidents WHERE website_id = $1', [websiteId]);
+    expect(incidents.rows[0].severity).toBe('critical');
+    expect(incidents.rows[0].description).toContain('522');
+    safeRequestMock.mockReset();
+  });
+
   it('creates a critical incident, marks the site down, and emails all configured addresses', async () => {
     safeRequestMock.mockRejectedValue(new Error('connection refused'));
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });

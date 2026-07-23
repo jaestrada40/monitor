@@ -19,6 +19,7 @@ const BROWSER_USER_AGENT =
 // Status codes commonly returned by WAF/bot-protection (Cloudflare, etc.) rather than a
 // genuinely broken site — worth a second check with a real browser before alerting.
 const LIKELY_BOT_BLOCK_STATUS_CODES = new Set([401, 403, 429]);
+const CLOUDFLARE_ORIGIN_ERROR_STATUS_CODES = new Set([521, 522, 523, 524, 525, 526]);
 
 // Hosting/domain providers usually serve these pages with a plain 200 OK, so status code
 // alone can't catch "the provider suspended the account for non-payment" — it looks
@@ -35,14 +36,34 @@ const SUSPENSION_MARKERS = [
   'dominio ha expirado',
   'sitio suspendido',
   'hosting suspendido',
+  'servicio suspendido',
+  'suspensión del servicio',
+  'payment required',
+  'billing issue',
 ];
+
+const MINFIN_BLOCK_MARKERS = ['sitio no permitido', '¡no disponible!'];
 
 function containsSuspensionMarkers(bodyText: string): boolean {
   const lower = bodyText.toLowerCase();
   return SUSPENSION_MARKERS.some((marker) => lower.includes(marker));
 }
 
-async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusCode?: number; suspended?: boolean }> {
+function containsMinfinBlockPage(bodyText: string): boolean {
+  const lower = bodyText.toLowerCase();
+  return MINFIN_BLOCK_MARKERS.every((marker) => lower.includes(marker));
+}
+
+interface PingResult {
+  ok: boolean;
+  ms: number;
+  statusCode?: number;
+  suspended?: boolean;
+  cloudflare?: boolean;
+  protectedPage?: boolean;
+}
+
+async function pingOnce(url: string): Promise<PingResult> {
   const start = Date.now();
   try {
     // safeRequest (not fetch) — fetch follows redirects transparently, which would let a
@@ -59,8 +80,11 @@ async function pingOnce(url: string): Promise<{ ok: boolean; ms: number; statusC
     // Cap how much we read — we only need enough of the page to catch a suspension
     // banner, not the whole document (which could be several MB on a heavy site).
     const suspended = containsSuspensionMarkers(response.body.slice(0, 20_000));
+    const serverHeader = String(response.headers?.server ?? '').toLowerCase();
+    const cloudflare = serverHeader.includes('cloudflare') || Boolean(response.headers?.['cf-ray']);
+    const protectedPage = cloudflare && containsMinfinBlockPage(response.body.slice(0, 150_000));
     const ok = response.statusCode >= 200 && response.statusCode < 300 && !suspended;
-    return { ok, ms: Date.now() - start, statusCode: response.statusCode, suspended };
+    return { ok, ms: Date.now() - start, statusCode: response.statusCode, suspended, cloudflare, protectedPage };
   } catch {
     return { ok: false, ms: -1 };
   }
@@ -197,6 +221,15 @@ export async function resolveActiveIncidentIfAny(pool: Pool, websiteId: string) 
   }
 }
 
+async function resolveWafWarnings(pool: Pool, websiteId: string) {
+  await pool.query(
+    `UPDATE incidents SET status = 'resolved', resolved_at = now()
+     WHERE website_id = $1 AND status != 'resolved' AND severity = 'warning'
+       AND description ILIKE '%WAF/anti-bot%'`,
+    [websiteId]
+  );
+}
+
 async function checkSslAndAlert(pool: Pool, website: WebsiteCheckTarget) {
   const previous = await pool.query('SELECT ssl_alerted_status FROM websites WHERE id = $1', [website.id]);
   const previousAlerted: string = previous.rows[0]?.ssl_alerted_status ?? '';
@@ -253,7 +286,7 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   // Full browser page loads take much longer than a plain HTTP ping, so their timing
   // isn't comparable to the latency threshold — track separately and skip that check below.
   let usedBrowserFallback = false;
-  if (!result.ok && result.statusCode !== undefined && LIKELY_BOT_BLOCK_STATUS_CODES.has(result.statusCode)) {
+  if (!result.ok && !result.protectedPage && result.statusCode !== undefined && LIKELY_BOT_BLOCK_STATUS_CODES.has(result.statusCode)) {
     const browserResult = await browserCheck(website.url);
     if (browserResult.ok) {
       result = browserResult;
@@ -261,8 +294,6 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     }
   }
 
-  const valueMs = result.ok ? result.ms : -1;
-  await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, $2)', [website.id, valueMs]);
   await pool.query('UPDATE websites SET last_checked = now() WHERE id = $1', [website.id]);
 
   await checkSslAndAlert(pool, website);
@@ -277,6 +308,7 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   // anything else that branches on statusCode — a suspended site is always a real outage,
   // never a WAF false positive.
   if (result.suspended) {
+    await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, -1)', [website.id]);
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);
     await createIncidentIfNeeded(
       pool,
@@ -287,22 +319,43 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     return;
   }
 
-  if (!result.ok && isLikelyWafBlock) {
-    await pool.query("UPDATE websites SET status = 'degraded' WHERE id = $1", [website.id]);
+  // MINFIN returns a branded Cloudflare 403 page ("Sitio no permitido") to this
+  // datacenter. The edge is reachable, but the origin content is hidden. Do not count
+  // this as uptime or downtime: preserve the historical SLA and expose the uncertainty.
+  if (!result.ok && result.protectedPage) {
+    await resolveWafWarnings(pool, website.id);
+    await pool.query("UPDATE websites SET status = 'protected' WHERE id = $1", [website.id]);
+    return;
+  }
+
+  // These Cloudflare codes specifically mean the edge could not reach or validate the
+  // origin, so unlike an access-policy 403 they are genuine outage signals.
+  if (!result.ok && result.cloudflare && result.statusCode !== undefined && CLOUDFLARE_ORIGIN_ERROR_STATUS_CODES.has(result.statusCode)) {
+    await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, -1)', [website.id]);
+    await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);
     await createIncidentIfNeeded(
       pool,
       website.id,
-      'warning',
-      `El sitio respondió con código ${result.statusCode}, típico de protección WAF/anti-bot — verifica manualmente en un navegador antes de asumir que está caído.`
+      'critical',
+      `Cloudflare respondió con código ${result.statusCode}: no pudo alcanzar o validar el servidor de origen.`
     );
     return;
   }
 
+  if (!result.ok && isLikelyWafBlock) {
+    await resolveWafWarnings(pool, website.id);
+    await pool.query("UPDATE websites SET status = 'protected' WHERE id = $1", [website.id]);
+    return;
+  }
+
   if (!result.ok) {
+    await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, -1)', [website.id]);
     await pool.query("UPDATE websites SET status = 'down' WHERE id = $1", [website.id]);
     await createIncidentIfNeeded(pool, website.id, 'critical', 'El sitio no respondió tras dos intentos de conexión.');
     return;
   }
+
+  await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, $2)', [website.id, result.ms]);
 
   if (!usedBrowserFallback && result.ms > website.thresholdResponseTime) {
     await pool.query("UPDATE websites SET status = 'degraded' WHERE id = $1", [website.id]);
@@ -317,5 +370,7 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
 
   if (website.status === 'down' || website.status === 'degraded') {
     await resolveActiveIncidentIfAny(pool, website.id);
+  } else if (website.status === 'protected') {
+    await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [website.id]);
   }
 }

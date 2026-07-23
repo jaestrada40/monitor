@@ -172,6 +172,7 @@ const MAX_RESPONSE_BYTES = 2_000_000;
 export interface SafeHttpResponse {
   statusCode: number;
   body: string;
+  headers: http.IncomingHttpHeaders;
 }
 
 // Replaces fetch() for any user-supplied URL: fetch() follows redirects transparently,
@@ -234,7 +235,7 @@ export function safeRequest(
             }
             body += chunk.toString('utf8');
           });
-          res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body }));
+          res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body, headers: res.headers }));
         }
       );
       req.on('timeout', () => req.destroy(new Error('request_timeout')));

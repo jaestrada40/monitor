@@ -18,7 +18,7 @@ export interface Website {
   id: string;
   name: string;
   url: string;
-  status: 'up' | 'down' | 'degraded' | 'maintenance';
+  status: 'up' | 'down' | 'degraded' | 'protected' | 'maintenance';
   uptime24h: number;
   uptime30d: number;
   responseTime: number; // in ms
