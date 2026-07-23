@@ -40,6 +40,7 @@ export default function DashboardView({
   // Compute metrics
   const totalWebsites = websites.length;
   const activeWebsites = websites.filter(w => w.status === 'up').length;
+  const verifiableWebsites = websites.filter(w => w.status !== 'protected');
   
   // Average response time (only for active up websites, down is 0)
   const upWebsites = websites.filter(w => w.status === 'up' || w.status === 'degraded');
@@ -48,7 +49,9 @@ export default function DashboardView({
     : 0;
 
   // Average 30-day uptime
-  const avgUptime30d = Number((websites.reduce((acc, curr) => acc + curr.uptime30d, 0) / totalWebsites).toFixed(2));
+  const avgUptime30d = verifiableWebsites.length > 0
+    ? Number((verifiableWebsites.reduce((acc, curr) => acc + curr.uptime30d, 0) / verifiableWebsites.length).toFixed(2))
+    : null;
 
   // Active incidents count
   const activeIncidents = incidents.filter(i => i.status !== 'resolved');
@@ -117,7 +120,7 @@ export default function DashboardView({
           <div className="flex items-start justify-between">
             <div>
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Uptime Global (30d)</span>
-              <div className="text-2xl font-bold font-mono text-slate-900 mt-1">{avgUptime30d}%</div>
+              <div className="text-2xl font-bold font-mono text-slate-900 mt-1">{avgUptime30d === null ? 'Sin datos' : `${avgUptime30d}%`}</div>
             </div>
             <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100">
               <ShieldCheck className="w-5 h-5" />
@@ -448,7 +451,7 @@ export default function DashboardView({
                     )}
                   </td>
                   <td className="py-3 text-center font-mono font-bold text-slate-800">
-                    {web.uptime24h}%
+                    {web.status === 'protected' ? <span className="text-sky-700">Sin validar</span> : `${Number(web.uptime24h.toFixed(2))}%`}
                   </td>
                   <td className="py-3 text-center">
                     <div className="font-mono font-bold text-slate-800">

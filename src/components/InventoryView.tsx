@@ -33,6 +33,10 @@ import Pagination from './Pagination';
 
 const PAGE_SIZE = 10;
 
+function formatUptime(value: number): string {
+  return new Intl.NumberFormat('es-GT', { maximumFractionDigits: 2 }).format(value);
+}
+
 interface InventoryViewProps {
   websites: Website[];
   onAddWebsite: (website: Pick<Website, 'name' | 'url' | 'checkInterval' | 'tags'>) => Promise<void>;
@@ -243,19 +247,19 @@ export default function InventoryView({
               className="bg-white border border-slate-200 rounded-xl shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between overflow-hidden group"
             >
               {/* Card Header Status */}
-              <div className="px-5 py-4 border-b border-slate-100/80 flex items-center justify-between">
-                <div>
+              <div className="px-5 py-4 border-b border-slate-100/80">
+                <div className="min-w-0">
                   <h3 className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors cursor-pointer text-sm line-clamp-1" onClick={() => onNavigateToDetails(web.id)}>
                     {web.name}
                   </h3>
-                  <a href={web.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-400 font-mono flex items-center gap-1 hover:text-indigo-500 mt-0.5">
-                    {web.url.replace('https://', '')}
-                    <ExternalLink className="w-2.5 h-2.5" />
+                  <a href={web.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-400 font-mono flex items-center gap-1 hover:text-indigo-500 mt-0.5 min-w-0">
+                    <span className="truncate">{web.url.replace('https://', '')}</span>
+                    <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                   </a>
                 </div>
 
                 {/* Status Badge */}
-                <div>
+                <div className="mt-2.5 min-h-5 flex items-center">
                   {web.status === 'up' && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 uppercase">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Up
@@ -290,7 +294,12 @@ export default function InventoryView({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-50/60 p-2.5 rounded-lg border border-slate-100 text-center">
                     <span className="text-[10px] font-mono text-slate-400 uppercase">Uptime 30d</span>
-                    <div className="text-sm font-bold font-mono text-slate-800 mt-0.5">{web.uptime30d}%</div>
+                    <div
+                      className={`text-sm font-bold font-mono mt-0.5 min-w-0 truncate ${web.status === 'protected' ? 'text-sky-700' : 'text-slate-800'}`}
+                      title={web.status === 'protected' ? 'Cloudflare impide validar el contenido; el uptime histórico no se muestra para evitar una lectura engañosa.' : `${formatUptime(web.uptime30d)}%`}
+                    >
+                      {web.status === 'protected' ? 'Sin validar' : `${formatUptime(web.uptime30d)}%`}
+                    </div>
                   </div>
                   <div className="bg-slate-50/60 p-2.5 rounded-lg border border-slate-100 text-center">
                     <span className="text-[10px] font-mono text-slate-400 uppercase">Respuesta</span>
@@ -475,8 +484,12 @@ export default function InventoryView({
                         </span>
                       )}
                     </td>
-                    <td className="p-4 text-center font-mono font-bold text-slate-800">{web.uptime24h}%</td>
-                    <td className="p-4 text-center font-mono font-bold text-slate-800">{web.uptime30d}%</td>
+                    <td className="p-4 text-center font-mono font-bold text-slate-800 whitespace-nowrap">
+                      {web.status === 'protected' ? <span className="text-sky-700">Sin validar</span> : `${formatUptime(web.uptime24h)}%`}
+                    </td>
+                    <td className="p-4 text-center font-mono font-bold text-slate-800 whitespace-nowrap">
+                      {web.status === 'protected' ? <span className="text-sky-700">Sin validar</span> : `${formatUptime(web.uptime30d)}%`}
+                    </td>
                     <td className="p-4 text-center font-mono font-bold text-indigo-600">{web.responseTime > 0 ? `${web.responseTime}ms` : '--'}</td>
                     <td className="p-4 font-mono text-slate-500">Cada {web.checkInterval}s</td>
                     <td className="p-4 text-right">

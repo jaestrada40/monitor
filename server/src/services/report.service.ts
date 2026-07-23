@@ -21,7 +21,10 @@ export function computeSlaPercentage(perSiteUptime: { uptime: number }[]): numbe
 }
 
 export async function computeReportSummary(pool: Pool, userId: string, days: number): Promise<ReportSummary> {
-  const sites = await pool.query('SELECT id, name FROM websites WHERE user_id = $1', [userId]);
+  // A protected site cannot be verified through Cloudflare, so including its historical
+  // false failures would distort SLA reports. It returns to reports automatically once a
+  // real content check succeeds and its status changes back to up/degraded/down.
+  const sites = await pool.query("SELECT id, name FROM websites WHERE user_id = $1 AND status != 'protected'", [userId]);
 
   const perSiteUptime = await Promise.all(
     sites.rows.map(async (site) => {

@@ -170,11 +170,17 @@ export default function DetailsView({
         <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-2xs">
           <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">SLA Histórico (30d)</span>
           <div className="mt-2 flex items-baseline gap-1">
-            <span className="text-3xl font-mono font-bold text-slate-900">{website.uptime30d}%</span>
+            <span className={`font-mono font-bold ${website.status === 'protected' ? 'text-xl text-sky-700' : 'text-3xl text-slate-900'}`}>
+              {website.status === 'protected' ? 'Sin validar' : `${Number(website.uptime30d.toFixed(2))}%`}
+            </span>
           </div>
-          <span className="text-[11px] text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
-            <CheckCircle2 className="w-3 h-3" /> Cumple con el acuerdo
-          </span>
+          {website.status === 'protected' ? (
+            <span className="text-[11px] text-sky-700 block mt-1">Cloudflare impide calcular el SLA actual.</span>
+          ) : (
+            <span className="text-[11px] text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
+              <CheckCircle2 className="w-3 h-3" /> Cumple con el acuerdo
+            </span>
+          )}
         </div>
 
         {/* Check frequency card */}
