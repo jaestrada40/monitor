@@ -122,3 +122,11 @@ ALTER TABLE websites ADD COLUMN IF NOT EXISTS ssl_alerted_status TEXT NOT NULL D
 -- password change or MFA reset can invalidate every session token issued before it,
 -- instead of leaving already-issued tokens valid for their full 7-day lifetime.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
+
+-- Consecutive-check counters for the WAF/Cloudflare "protected" state: protected_streak
+-- counts checks blocked in a row (must reach PROTECTED_ALERT_STREAK before alerting, since
+-- some sites flap between blocked/reachable on nearly every check); protected_recovery_streak
+-- counts clean checks in a row while still 'protected' (must reach PROTECTED_RECOVERY_STREAK
+-- before we consider it actually recovered). See monitor.service.ts.
+ALTER TABLE websites ADD COLUMN IF NOT EXISTS protected_streak INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE websites ADD COLUMN IF NOT EXISTS protected_recovery_streak INTEGER NOT NULL DEFAULT 0;
