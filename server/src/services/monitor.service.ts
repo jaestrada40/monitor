@@ -320,11 +320,19 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
   }
 
   // MINFIN returns a branded Cloudflare 403 page ("Sitio no permitido") to this
-  // datacenter. The edge is reachable, but the origin content is hidden. Do not count
-  // this as uptime or downtime: preserve the historical SLA and expose the uncertainty.
+  // datacenter. The edge is reachable, but the origin content is hidden, so we can't
+  // confirm the origin is actually up — preserve the historical SLA (don't count this
+  // check as uptime or downtime) but still alert, since this is indistinguishable from
+  // a real outage from our side and staying silent means genuine outages go unnoticed.
   if (!result.ok && result.protectedPage) {
     await resolveWafWarnings(pool, website.id);
     await pool.query("UPDATE websites SET status = 'protected' WHERE id = $1", [website.id]);
+    await createIncidentIfNeeded(
+      pool,
+      website.id,
+      'critical',
+      'El sitio respondió con una página de bloqueo de Cloudflare/WAF ("Sitio no permitido") hacia nuestro monitor. Puede ser un bloqueo del proveedor o una caída real del origen — no se puede confirmar cuál desde aquí.'
+    );
     return;
   }
 
@@ -368,9 +376,10 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     return;
   }
 
-  if (website.status === 'down' || website.status === 'degraded') {
+  if (website.status === 'down' || website.status === 'degraded' || website.status === 'protected') {
     await resolveActiveIncidentIfAny(pool, website.id);
-  } else if (website.status === 'protected') {
+  }
+  if (website.status === 'protected') {
     await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [website.id]);
   }
 }
