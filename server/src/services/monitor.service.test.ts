@@ -68,7 +68,7 @@ describe('monitor.service', () => {
     safeRequestMock.mockReset();
   });
 
-  it('marks the known MINFIN Cloudflare block as protected without reducing uptime, but still alerts since a real outage would look identical', async () => {
+  it('marks the known MINFIN Cloudflare block as protected without reducing uptime, and does not alert on a single occurrence', async () => {
     safeRequestMock.mockResolvedValue({
       statusCode: 403,
       headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' },
@@ -77,11 +77,94 @@ describe('monitor.service', () => {
 
     await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
 
-    const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    const site = await pool.query('SELECT status, protected_streak FROM websites WHERE id = $1', [websiteId]);
     expect(site.rows[0].status).toBe('protected');
+    expect(site.rows[0].protected_streak).toBe(1);
     const checks = await pool.query('SELECT value_ms FROM response_time_checks WHERE website_id = $1', [websiteId]);
     expect(checks.rows).toHaveLength(0);
-    const incidents = await pool.query('SELECT id, severity FROM incidents WHERE website_id = $1', [websiteId]);
+    const incidents = await pool.query('SELECT id FROM incidents WHERE website_id = $1', [websiteId]);
+    expect(incidents.rows).toHaveLength(0);
+    expect(sendIncidentEmailMock).not.toHaveBeenCalled();
+    safeRequestMock.mockReset();
+  });
+
+  it('alerts once a Cloudflare block persists for 10 consecutive checks, not before', async () => {
+    safeRequestMock.mockResolvedValue({
+      statusCode: 403,
+      headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' },
+      body: '<title>¡No disponible!</title><p>Sitio no permitido</p>',
+    });
+
+    for (let i = 0; i < 9; i++) {
+      await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'protected', thresholdResponseTime: 500, thresholdSslDays: 7 });
+    }
+    expect(sendIncidentEmailMock).not.toHaveBeenCalled();
+    let incidents = await pool.query('SELECT id FROM incidents WHERE website_id = $1', [websiteId]);
+    expect(incidents.rows).toHaveLength(0);
+
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'protected', thresholdResponseTime: 500, thresholdSslDays: 7 });
+
+    incidents = await pool.query('SELECT id, severity FROM incidents WHERE website_id = $1', [websiteId]);
+    expect(incidents.rows).toHaveLength(1);
+    expect(incidents.rows[0].severity).toBe('critical');
+    expect(sendIncidentEmailMock).toHaveBeenCalledTimes(1);
+    safeRequestMock.mockReset();
+  });
+
+  it('does not resolve or re-alert on a single stray success in the middle of a sustained block, but does after 3 clean checks in a row', async () => {
+    safeRequestMock.mockResolvedValue({
+      statusCode: 403,
+      headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' },
+      body: '<title>¡No disponible!</title><p>Sitio no permitido</p>',
+    });
+    for (let i = 0; i < 10; i++) {
+      await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'protected', thresholdResponseTime: 500, thresholdSslDays: 7 });
+    }
+    expect(sendIncidentEmailMock).toHaveBeenCalledTimes(1);
+    safeRequestMock.mockReset();
+
+    // One stray clean check — should not resolve the incident yet.
+    safeRequestMock.mockResolvedValueOnce({ statusCode: 200, body: '' });
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'protected', thresholdResponseTime: 500, thresholdSslDays: 7 });
+    let site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('protected');
+    let incidents = await pool.query("SELECT id FROM incidents WHERE website_id = $1 AND status != 'resolved'", [websiteId]);
+    expect(incidents.rows).toHaveLength(1);
+
+    // Blocked again — the earlier stray success shouldn't count toward re-alerting either.
+    safeRequestMock.mockResolvedValueOnce({
+      statusCode: 403,
+      headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' },
+      body: '<title>¡No disponible!</title><p>Sitio no permitido</p>',
+    });
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'protected', thresholdResponseTime: 500, thresholdSslDays: 7 });
+    expect(sendIncidentEmailMock).toHaveBeenCalledTimes(1);
+
+    // Now 3 clean checks in a row — should resolve and email once.
+    safeRequestMock.mockResolvedValue({ statusCode: 200, body: '' });
+    for (let i = 0; i < 3; i++) {
+      await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'protected', thresholdResponseTime: 500, thresholdSslDays: 7 });
+    }
+    site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('up');
+    incidents = await pool.query("SELECT id FROM incidents WHERE website_id = $1 AND status = 'resolved'", [websiteId]);
+    expect(incidents.rows).toHaveLength(1);
+    expect(sendIncidentEmailMock).toHaveBeenCalledTimes(2);
+    expect(sendIncidentEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'resolved' }));
+    safeRequestMock.mockReset();
+  });
+
+  it('treats the hosting platform "application is not available" page as a genuine outage, not a WAF block', async () => {
+    safeRequestMock.mockResolvedValue({
+      statusCode: 200,
+      body: '<h1>Application is not available</h1><p>The application is currently not serving requests at this endpoint.</p>',
+    });
+
+    await checkWebsite(pool, { id: websiteId, url: 'https://example.com', status: 'up', thresholdResponseTime: 500, thresholdSslDays: 7 });
+
+    const site = await pool.query('SELECT status FROM websites WHERE id = $1', [websiteId]);
+    expect(site.rows[0].status).toBe('down');
+    const incidents = await pool.query('SELECT severity, description FROM incidents WHERE website_id = $1', [websiteId]);
     expect(incidents.rows).toHaveLength(1);
     expect(incidents.rows[0].severity).toBe('critical');
     expect(sendIncidentEmailMock).toHaveBeenCalledTimes(1);

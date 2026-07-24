@@ -44,6 +44,20 @@ const SUSPENSION_MARKERS = [
 
 const MINFIN_BLOCK_MARKERS = ['sitio no permitido', '¡no disponible!'];
 
+// The hosting platform's own "no deployment running here" page (e.g. OpenShift's default
+// route error), distinct from a WAF block — the origin itself has nothing to serve, which
+// is a genuine outage. Also usually served with a plain 200/503, so text detection again.
+const ORIGIN_DOWN_MARKERS = ['application is not available', 'is currently not serving requests'];
+
+// How many consecutive checks a Cloudflare/WAF block page must persist before we alert.
+// MINFIN flaps between blocked and reachable almost every check, so alerting on the first
+// occurrence would email on every flap — this requires a sustained block instead.
+const PROTECTED_ALERT_STREAK = 10;
+// How many consecutive clean checks are needed to consider a blocked site actually
+// recovered. A single stray "ok" in the middle of an otherwise-blocked run is itself
+// ambiguous, so one success alone shouldn't close the incident or reset the count to zero.
+const PROTECTED_RECOVERY_STREAK = 3;
+
 function containsSuspensionMarkers(bodyText: string): boolean {
   const lower = bodyText.toLowerCase();
   return SUSPENSION_MARKERS.some((marker) => lower.includes(marker));
@@ -54,11 +68,17 @@ function containsMinfinBlockPage(bodyText: string): boolean {
   return MINFIN_BLOCK_MARKERS.every((marker) => lower.includes(marker));
 }
 
+function containsOriginDownMarkers(bodyText: string): boolean {
+  const lower = bodyText.toLowerCase();
+  return ORIGIN_DOWN_MARKERS.some((marker) => lower.includes(marker));
+}
+
 interface PingResult {
   ok: boolean;
   ms: number;
   statusCode?: number;
   suspended?: boolean;
+  originDown?: boolean;
   cloudflare?: boolean;
   protectedPage?: boolean;
 }
@@ -80,11 +100,12 @@ async function pingOnce(url: string): Promise<PingResult> {
     // Cap how much we read — we only need enough of the page to catch a suspension
     // banner, not the whole document (which could be several MB on a heavy site).
     const suspended = containsSuspensionMarkers(response.body.slice(0, 20_000));
+    const originDown = containsOriginDownMarkers(response.body.slice(0, 20_000));
     const serverHeader = String(response.headers?.server ?? '').toLowerCase();
     const cloudflare = serverHeader.includes('cloudflare') || Boolean(response.headers?.['cf-ray']);
     const protectedPage = cloudflare && containsMinfinBlockPage(response.body.slice(0, 150_000));
-    const ok = response.statusCode >= 200 && response.statusCode < 300 && !suspended;
-    return { ok, ms: Date.now() - start, statusCode: response.statusCode, suspended, cloudflare, protectedPage };
+    const ok = response.statusCode >= 200 && response.statusCode < 300 && !suspended && !originDown;
+    return { ok, ms: Date.now() - start, statusCode: response.statusCode, suspended, originDown, cloudflare, protectedPage };
   } catch {
     return { ok: false, ms: -1 };
   }
@@ -319,20 +340,42 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     return;
   }
 
-  // MINFIN returns a branded Cloudflare 403 page ("Sitio no permitido") to this
-  // datacenter. The edge is reachable, but the origin content is hidden, so we can't
-  // confirm the origin is actually up — preserve the historical SLA (don't count this
-  // check as uptime or downtime) but still alert, since this is indistinguishable from
-  // a real outage from our side and staying silent means genuine outages go unnoticed.
-  if (!result.ok && result.protectedPage) {
-    await resolveWafWarnings(pool, website.id);
-    await pool.query("UPDATE websites SET status = 'protected' WHERE id = $1", [website.id]);
+  // The hosting platform itself says nothing is deployed at this route — unlike a WAF
+  // block, this is unambiguous: there is no origin content to hide behind, so it's always
+  // a real outage. Checked before the WAF branch below for the same reason as suspended.
+  if (result.originDown) {
+    await pool.query('INSERT INTO response_time_checks (website_id, value_ms) VALUES ($1, -1)', [website.id]);
+    await pool.query("UPDATE websites SET status = 'down', protected_streak = 0 WHERE id = $1", [website.id]);
     await createIncidentIfNeeded(
       pool,
       website.id,
       'critical',
-      'El sitio respondió con una página de bloqueo de Cloudflare/WAF ("Sitio no permitido") hacia nuestro monitor. Puede ser un bloqueo del proveedor o una caída real del origen — no se puede confirmar cuál desde aquí.'
+      'El sitio respondió con la página de error de la plataforma de hosting ("Application is not available") — no hay ningún despliegue activo respondiendo en esa ruta.'
     );
+    return;
+  }
+
+  // MINFIN returns a branded Cloudflare 403 page ("Sitio no permitido") to this
+  // datacenter. The edge is reachable, but the origin content is hidden, so we can't
+  // confirm the origin is actually up. It also flaps between blocked and reachable on
+  // almost every check, so we only alert once the block has persisted for
+  // PROTECTED_ALERT_STREAK consecutive checks — alerting on the first occurrence would
+  // email on every flap.
+  if (!result.ok && result.protectedPage) {
+    await resolveWafWarnings(pool, website.id);
+    const streakResult = await pool.query(
+      "UPDATE websites SET status = 'protected', protected_streak = protected_streak + 1, protected_recovery_streak = 0 WHERE id = $1 RETURNING protected_streak",
+      [website.id]
+    );
+    const streak: number = streakResult.rows[0].protected_streak;
+    if (streak >= PROTECTED_ALERT_STREAK) {
+      await createIncidentIfNeeded(
+        pool,
+        website.id,
+        'critical',
+        `El sitio lleva ${streak} chequeos seguidos respondiendo con una página de bloqueo de Cloudflare/WAF ("Sitio no permitido") hacia nuestro monitor. Puede ser un bloqueo sostenido del proveedor o una caída real del origen — no se puede confirmar cuál desde aquí.`
+      );
+    }
     return;
   }
 
@@ -376,10 +419,21 @@ export async function checkWebsite(pool: Pool, website: WebsiteCheckTarget) {
     return;
   }
 
-  if (website.status === 'down' || website.status === 'degraded' || website.status === 'protected') {
+  if (website.status === 'down' || website.status === 'degraded') {
+    await pool.query('UPDATE websites SET protected_streak = 0, protected_recovery_streak = 0 WHERE id = $1', [website.id]);
     await resolveActiveIncidentIfAny(pool, website.id);
-  }
-  if (website.status === 'protected') {
-    await pool.query("UPDATE websites SET status = 'up' WHERE id = $1", [website.id]);
+  } else if (website.status === 'protected') {
+    // A single clean check isn't enough evidence the block actually lifted (MINFIN flaps),
+    // so require PROTECTED_RECOVERY_STREAK in a row before flipping back to 'up' and
+    // resolving/emailing — an isolated stray success no longer reopens/re-alerts later.
+    const recoveryResult = await pool.query(
+      'UPDATE websites SET protected_streak = 0, protected_recovery_streak = protected_recovery_streak + 1 WHERE id = $1 RETURNING protected_recovery_streak',
+      [website.id]
+    );
+    const recoveryStreak: number = recoveryResult.rows[0].protected_recovery_streak;
+    if (recoveryStreak >= PROTECTED_RECOVERY_STREAK) {
+      await pool.query('UPDATE websites SET status = \'up\', protected_recovery_streak = 0 WHERE id = $1', [website.id]);
+      await resolveActiveIncidentIfAny(pool, website.id);
+    }
   }
 }
