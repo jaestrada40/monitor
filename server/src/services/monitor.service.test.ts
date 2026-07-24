@@ -68,7 +68,7 @@ describe('monitor.service', () => {
     safeRequestMock.mockReset();
   });
 
-  it('marks the known MINFIN Cloudflare block as protected without reducing uptime or opening an incident', async () => {
+  it('marks the known MINFIN Cloudflare block as protected without reducing uptime, but still alerts since a real outage would look identical', async () => {
     safeRequestMock.mockResolvedValue({
       statusCode: 403,
       headers: { server: 'cloudflare', 'cf-ray': 'abc-EWR' },
@@ -81,8 +81,10 @@ describe('monitor.service', () => {
     expect(site.rows[0].status).toBe('protected');
     const checks = await pool.query('SELECT value_ms FROM response_time_checks WHERE website_id = $1', [websiteId]);
     expect(checks.rows).toHaveLength(0);
-    const incidents = await pool.query('SELECT id FROM incidents WHERE website_id = $1', [websiteId]);
-    expect(incidents.rows).toHaveLength(0);
+    const incidents = await pool.query('SELECT id, severity FROM incidents WHERE website_id = $1', [websiteId]);
+    expect(incidents.rows).toHaveLength(1);
+    expect(incidents.rows[0].severity).toBe('critical');
+    expect(sendIncidentEmailMock).toHaveBeenCalledTimes(1);
     safeRequestMock.mockReset();
   });
 
